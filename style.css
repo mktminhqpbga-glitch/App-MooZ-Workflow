@@ -2431,6 +2431,66 @@ dialog form > textarea {
 }
 .image-prompt-composer.expanded > textarea { min-height: 260px; }
 
+/* Keep every aspect ratio inside a compact preview envelope. */
+.cvn-node.generation-node:has(> .cvn-node-body[style*="--preview-ratio"]) {
+  width: var(--media-node-width, 460px);
+}
+.generation-node:has(> .cvn-node-body[style*="--preview-ratio"]) > .inline-composer {
+  margin-left: calc((var(--media-node-width, 460px) - 530px) / 2);
+}
+.image-generation-node > .image-prompt-composer {
+  width: 720px;
+  margin: 16px 0 0 calc((var(--media-node-width, 460px) - 720px) / 2);
+  padding: 16px;
+  border-radius: 20px;
+}
+.image-generation-node:has(> .cvn-node-body[style*="--preview-ratio"]) > .image-prompt-composer {
+  margin-left: calc((var(--media-node-width, 460px) - 720px) / 2);
+}
+.image-generation-node > .cvn-node-title { font-size: 13px; }
+.image-generation-node .cvn-empty-symbol svg { width: 44px; height: 44px; }
+.image-generation-node > .cvn-port { width: 26px; height: 26px; font-size: 20px; }
+.image-generation-node > .cvn-port.input { left: -38px; }
+.image-generation-node > .cvn-port.output { right: -38px; }
+.image-prompt-composer > .inline-tools > button {
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.image-prompt-composer .inline-tools svg { width: 17px; height: 17px; }
+.image-prompt-composer > textarea {
+  min-height: 110px;
+  padding: 16px 2px;
+  font-size: 15px;
+}
+.image-prompt-composer .inline-ref { width: 56px; min-height: 56px; border-radius: 10px; }
+.image-prompt-composer .inline-ref img { width: 56px; height: 56px; border-radius: 9px; }
+.image-prompt-composer .inline-ref-number {
+  top: 3px;
+  left: 3px;
+  min-width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+.image-prompt-composer > .inline-footer { min-height: 42px; gap: 10px; }
+.image-prompt-composer .inline-footer > select { max-width: 190px; font-size: 14px; }
+.image-prompt-composer .inline-settings { padding-left: 10px; }
+.image-prompt-composer .inline-footer summary { font-size: 12px; }
+.image-prompt-composer .inline-footer > button:not(.inline-send) svg { width: 20px; height: 20px; }
+.image-prompt-composer .inline-send {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px !important;
+  font-size: 27px !important;
+}
+.image-generation-node:has(> .cvn-node-body[style*="--preview-ratio"]) > .image-prompt-composer.expanded {
+  width: 960px;
+  margin-left: calc((var(--media-node-width, 460px) - 960px) / 2);
+}
+.image-prompt-composer.expanded > textarea { min-height: 190px; }
+
 .cvn-resource-sheet.creative-assistant[open] {
   width: 420px;
   max-width: calc(100vw - 32px);

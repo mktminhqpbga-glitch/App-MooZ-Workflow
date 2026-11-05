@@ -834,6 +834,8 @@ export async function mountStudio(host, id) {
     const [width, height] = value.split(":").map(Number);
     if (width > 0 && height > 0) {
       body.style.setProperty("--preview-ratio", `${width} / ${height}`);
+      // Portrait previews shrink in width instead of growing beyond the canvas.
+      body.parentElement.style.setProperty("--media-node-width", Math.min(460, 340 * width / height) + "px");
       requestAnimationFrame(() => {
         if (!body.isConnected) return;
         for (const port of body.parentElement.querySelectorAll(":scope > .cvn-port"))
