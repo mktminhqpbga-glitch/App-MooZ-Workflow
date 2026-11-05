@@ -13,23 +13,23 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci
+      - run: node .github/scripts/check.cjs npm ci
       - run: command -v ffmpeg || brew install ffmpeg
       - run: npx playwright install chromium
       - name: Locate Chromium for integration tests
         run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'CHROMIUM_PATH='+require('playwright').chromium.executablePath()+'\n')"
-      - run: npm run build
-      - run: npm run test:all
-      - run: npm run package:mac
+      - run: node .github/scripts/check.cjs npm run build
+      - run: node .github/scripts/check.cjs npm run test:all
+      - run: node .github/scripts/check.cjs npm run package:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Launch and test the packaged Mac app
-        run: npm run test:packaged
+        run: node .github/scripts/check.cjs npm run test:packaged
       - name: Prepare downloadable extension and checksums
         run: |
           cp downloads/MooZ-Connect.zip artifacts/MooZ-Connect.zip
