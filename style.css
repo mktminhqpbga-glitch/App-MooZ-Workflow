@@ -821,11 +821,45 @@ select {
   color: var(--muted);
   font-size: 12px;
 }
-.canvas-launcher > .intro {
-  margin-bottom: 20px;
-}
-.canvas-launcher > .project-actions {
+.canvas-launcher-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 16px;
+  min-width: 0;
   margin-bottom: 24px;
+}
+.canvas-launcher-toolbar > .back {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.canvas-launcher-toolbar > h1 {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -.5px;
+}
+.canvas-launcher-toolbar > .intro {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.canvas-launcher-toolbar > .project-actions {
+  flex-shrink: 0;
+  margin-left: auto;
+  flex-wrap: nowrap;
+}
+@media (max-width: 700px) {
+  .canvas-launcher-toolbar { gap: 10px; }
+  .canvas-launcher-toolbar > .back span { display: none; }
+  .canvas-launcher-toolbar > h1 { font-size: 18px; }
 }
 .canvas-project-list {
   margin-top: 0;

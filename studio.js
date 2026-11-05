@@ -18,8 +18,9 @@ const repo = new ProjectRepository();
 export async function mountStudio(host, id) {
   if (!id) {
     host.innerHTML =
-      '<section class="canvas-launcher"><a class="back" href="#home">← Về tổng quan</a><h1>Canvas</h1><p class="intro">Mở dự án hoặc tạo một không gian mới.</p></section>';
-    const launcher = host.querySelector(".canvas-launcher");
+      '<section class="canvas-launcher"><div class="canvas-launcher-toolbar"><a class="back" href="#home" aria-label="Về tổng quan">←<span> Về tổng quan</span></a><h1>Canvas</h1><p class="intro">Mở dự án hoặc tạo một không gian mới.</p></div></section>';
+    const launcher = host.querySelector(".canvas-launcher"),
+      toolbar = launcher.querySelector(".canvas-launcher-toolbar");
     const actions = el("div", undefined, "project-actions");
     actions.append(
       button("＋ Dự án mới", async () => {
@@ -30,7 +31,8 @@ export async function mountStudio(host, id) {
       }),
     );
     const projects = el("div", undefined, "project-list canvas-project-list");
-    launcher.append(actions, projects);
+    toolbar.append(actions);
+    launcher.append(projects);
     for (const p of await repo.list()) {
       let current = p;
       const card = el("article", undefined, "project-card canvas-project-card"),
