@@ -413,32 +413,25 @@ export async function mountStudio(host, id) {
   function fit() {
     const nodes = controller.snapshot().nodes;
     if (!nodes.length) return;
-    const x = Math.min(...nodes.map((n) => n.x)),
+    const bounds = nodes.map(n => {
+      const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`),
+        composer = card?.querySelector(".inline-composer:not([hidden])");
+      return {
+        left: n.x + Math.min(0, composer?.offsetLeft || 0),
+        right: n.x + Math.max(card?.offsetWidth || 340, composer ? composer.offsetLeft + composer.offsetWidth : 0),
+        bottom: n.y + (card?.offsetHeight || 330),
+      };
+    });
+    const x = Math.min(...bounds.map(b => b.left)),
       y = Math.min(...nodes.map((n) => n.y)),
-      width =
-        Math.max(
-          ...nodes.map(
-            (n) =>
-              n.x +
-              (stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`)
-                ?.offsetWidth || 340),
-          ),
-        ) - x,
-      height =
-        Math.max(
-          ...nodes.map(
-            (n) =>
-              n.y +
-              (stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`)
-                ?.offsetHeight || 330),
-          ),
-        ) - y;
+      width = Math.max(...bounds.map(b => b.right)) - x,
+      height = Math.max(...bounds.map(b => b.bottom)) - y;
     pan.zoom = Math.max(
       0.1,
-      Math.min(1, (innerWidth - 140) / width, (innerHeight - 230) / height),
+      Math.min(1, (innerWidth - 80) / width, (innerHeight - 240) / height),
     );
     pan.x = (innerWidth - width * pan.zoom) / 2 - x * pan.zoom;
-    pan.y = 170 - y * pan.zoom;
+    pan.y = 120 - y * pan.zoom;
     transform();
     controller.execute({ type: "setViewport", viewport: pan });
     void persist();
@@ -587,6 +580,10 @@ export async function mountStudio(host, id) {
         title = el("div", n.data.customName || n.type, "cvn-node-title"),
         body = el("div", undefined, "cvn-node-body");
       card.dataset.id = n.id;
+      if (n.type === "generateImage") {
+        card.classList.add("image-generation-node");
+        title.prepend(icon("image"));
+      }
       Object.assign(card.style, { left: n.x + "px", top: n.y + "px" });
       card.append(title, body);
       if (["generateImage", "generateVideo"].includes(n.type))
@@ -609,12 +606,11 @@ export async function mountStudio(host, id) {
       } else if (n.type === "generateText" && n.data.text) {
         body.append(el("p", n.data.text));
       } else {
+        const placeholder = el("span", undefined, "cvn-empty-symbol");
+        if (n.type === "generateImage") placeholder.append(icon("image"));
+        else placeholder.textContent = n.type === "generateVideo" ? "▷" : "▧";
         body.append(
-          el(
-            "span",
-            n.type === "generateVideo" ? "▷" : "▧",
-            "cvn-empty-symbol",
-          ),
+          placeholder,
           el(
             "small",
             n.type === "generateVideo"
@@ -910,6 +906,7 @@ export async function mountStudio(host, id) {
             ? "video"
             : "text";
     const composer = el("section", undefined, "inline-composer");
+    if (kind === "image") composer.classList.add("image-prompt-composer");
     composer.setAttribute(
       "aria-label",
       "Prompt " + (n.data.customName || n.type),
@@ -1007,7 +1004,7 @@ export async function mountStudio(host, id) {
     text.placeholder =
       kind === "video"
         ? "Mô tả chuyển động, cảnh quay và nội dung video…"
-        : "Mô tả hình ảnh bạn muốn tạo…";
+        : "Nhập mô tả để tạo ảnh, hoặc tải ảnh lên và viết yêu cầu chỉnh sửa, ví dụ: đổi nền thành đêm tuyết…";
     text.setAttribute("aria-label", "Nội dung yêu cầu");
     text.maxLength = 50000;
     text.oninput = () => updateInline(id, { studioPrompt: text.value });
@@ -1346,14 +1343,25 @@ export async function mountStudio(host, id) {
         "aria-expanded",
         String(composer.classList.contains("expanded")),
       );
+      if (kind === "image") fit();
     });
     expand.append(icon("expand"));
     expand.setAttribute("aria-label", "Mở rộng prompt");
     expand.title = "Mở rộng prompt";
     tools.append(expand);
+    if (kind === "image") {
+      for (const b of tools.querySelectorAll("button")) {
+        const label = b.textContent;
+        const toolIcon = label.includes("Tải lên") ? "upload" : label === "Tham chiếu" ? "reference" : label === "Đánh dấu" ? "pin" : label === "Phong cách" ? "style" : null;
+        if (toolIcon) {
+          const caption = el("span", label.replace("＋ ", ""));
+          b.replaceChildren(icon(toolIcon), caption);
+        }
+      }
+    }
     composer.append(tools, refs, chooser, text, footer, hint);
     const incoming = controller.snapshot().edges.filter((e) => e.target === id);
-    for (const edge of incoming) {
+    for (const [index, edge] of incoming.entries()) {
       const source = controller
         .snapshot()
         .nodes.find((n) => n.id === edge.source);
@@ -1365,6 +1373,8 @@ export async function mountStudio(host, id) {
         },
         "inline-ref",
       );
+      chip.setAttribute("aria-label", "Tham chiếu " + (index + 1) + ": " + (source?.data.customName || "Nguồn"));
+      chip.title = source?.data.customName || "Nguồn tham chiếu";
       if (source?.data.assetId) {
         chip.textContent = "";
         const preview = el("span");
@@ -1384,6 +1394,7 @@ export async function mountStudio(host, id) {
           }
         })();
       }
+      chip.append(el("span", String(index + 1), "inline-ref-number"));
       refs.append(chip);
     }
     function fillChooser() {

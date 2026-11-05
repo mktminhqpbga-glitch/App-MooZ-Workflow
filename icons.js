@@ -1,4 +1,7 @@
 const paths = {
+  image: "M3 3h18v18H3zM3 17l5-6 5 5 3-4 5 6M15 7h.01",
+  upload: "M12 16V3M7 8l5-5 5 5M3 15v6h18v-6",
+  reference: "M4 4h16v12h-7l-4 5v-5H4zM8 8h8M8 12h5",
   pointer: "m5 3 14 10-7 1-3 7z",
   hand: "M8 12V6a2 2 0 0 1 4 0v6M12 10V4a2 2 0 0 1 4 0v8M16 9a2 2 0 0 1 4 0v7c0 5-12 7-14 1l-3-5a2 2 0 0 1 3-2l2 3",
   materials: "m5 3 4 4-4 4-4-4zM16 4h5v5h-5zM3 16h5v5H3zM17 14v8M13 18h8",
