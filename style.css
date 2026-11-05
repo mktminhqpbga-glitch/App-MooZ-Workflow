@@ -889,6 +889,15 @@ dialog .project-actions {
 }
 .studio-mode > .workspace {
   margin: 0;
+  width: 100%;
+  max-width: none;
+}
+.studio-mode {
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  overflow: hidden;
 }
 .studio-mode #main {
   padding: 0;
@@ -898,6 +907,14 @@ dialog .project-actions {
 .cvn-studio {
   position: fixed;
   inset: 0;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   background: var(--bg);
   overflow: hidden;
 }

@@ -221,7 +221,8 @@ export async function mountStudio(host, id) {
     }
   };
   shell.append(files);
-  host.append(shell);
+  // Keep the fullscreen canvas outside the dashboard's content-width limits.
+  document.body.append(shell);
   const editor = el("dialog", undefined, "cvn-resource-sheet");
   editor.setAttribute("aria-label", "Tài nguyên dự án");
   document.body.append(editor);
@@ -1736,6 +1737,7 @@ export async function mountStudio(host, id) {
     clearTimeout(inlineSave);
     if (drawFrame) cancelAnimationFrame(drawFrame);
     abort.abort();
+    shell.remove();
     editor.remove();
     for (const dialog of document.querySelectorAll(".image-workbench"))
       dialog.close();
