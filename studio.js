@@ -196,6 +196,7 @@ export async function mountStudio(host, id) {
     drawFrame = null,
     wheelSave = null,
     inlineSave = null;
+  const referencePickerOpen = new Set();
   const bindings = new Map(),
     activeJobs = new Map(),
     batches = new Map();
@@ -398,8 +399,12 @@ export async function mountStudio(host, id) {
     editor.style.inset = "auto";
     editor.style.margin = "0";
     editor.style.transform = "none";
+    const above = anchor.top - 24, below = innerHeight - anchor.bottom - 24,
+      placeAbove = above >= 160 || above >= below;
+    editor.style.maxHeight = Math.max(96, placeAbove ? above : below) + "px";
+    editor.style.overflowY = "auto";
     editor.style.left = Math.max(12, Math.min(anchor.left + anchor.width / 2 - editor.offsetWidth / 2, innerWidth - editor.offsetWidth - 12)) + "px";
-    editor.style.top = Math.max(12, anchor.top - editor.offsetHeight - 12) + "px";
+    editor.style.top = Math.max(12, placeAbove ? anchor.top - editor.offsetHeight - 12 : anchor.bottom + 12) + "px";
   }
   function bindInlinePopup(control, action) {
     control.setAttribute("aria-expanded", "false");
@@ -438,9 +443,11 @@ export async function mountStudio(host, id) {
   }
   function setPointerMode(hand) {
     panMode = hand;
-    select.setAttribute("aria-pressed", String(!hand));
-    select.title = hand ? "Kéo Canvas" : "Di chuyển";
-    select.replaceChildren(icon(hand ? "hand" : "pointer"));
+    select.setAttribute("aria-pressed", "true");
+    select.dataset.mode = hand ? "hand" : "pointer";
+    select.setAttribute("aria-label", hand ? "Bàn tay (H)" : "Di chuyển (V)");
+    select.title = hand ? "Bàn tay · Kéo Canvas (H)" : "Di chuyển · Chọn và kéo node (V)";
+    select.replaceChildren(icon(hand ? "hand" : "pointer"), el("span", hand ? "H" : "V", "tool-mode-badge"));
     viewport.style.cursor = hand ? "grab" : "";
   }
   function pointerTools() {
@@ -479,6 +486,7 @@ export async function mountStudio(host, id) {
     control.onpointerenter = event => { if (event.pointerType !== "touch") show(); };
     control.onclick = show;
   }
+  setPointerMode(false);
   window.addEventListener("pointermove", event => {
     if (!dockAnchor || !editor.open) return;
     const button = dockAnchor.getBoundingClientRect(), panel = editor.getBoundingClientRect();
@@ -1203,7 +1211,8 @@ export async function mountStudio(host, id) {
     const tools = el("div", undefined, "inline-tools"),
       refs = el("div", undefined, "inline-refs"),
       chooser = el("section", undefined, "inline-chooser");
-    chooser.hidden = true;
+    chooser.hidden = !referencePickerOpen.has(id);
+    let chooserRevision = 0;
     const upload = el("input");
     upload.type = "file";
     upload.accept = "image/*";
@@ -1242,7 +1251,8 @@ export async function mountStudio(host, id) {
       button("＋ Tải lên", () => upload.click()),
       button("Tham chiếu", () => {
         chooser.hidden = !chooser.hidden;
-        if (!chooser.hidden) fillChooser();
+        if (!chooser.hidden) { referencePickerOpen.add(id); void fillChooser(); }
+        else referencePickerOpen.delete(id);
       }),
       upload,
     );
@@ -1709,8 +1719,8 @@ export async function mountStudio(host, id) {
     }
     composer.append(tools, refs, chooser, text, footer, hint);
     const incoming = kind === "video"
-      ? videoReferences().map(reference => ({ source: reference.nodeId, assetReference: reference }))
-      : controller.snapshot().edges.filter((e) => e.target === id);
+      ? [...videoReferences().map(reference => ({ source: reference.nodeId, assetReference: reference })), ...controller.snapshot().edges.filter(edge => edge.target === id && edge.targetPort === "video" && controller.snapshot().nodes.find(node => node.id === edge.source)?.data.assetId)]
+      : controller.snapshot().edges.filter(edge => edge.target === id && ["reference", "video"].includes(edge.targetPort) && controller.snapshot().nodes.find(node => node.id === edge.source)?.data.assetId);
     for (const [index, edge] of incoming.entries()) {
       const source = edge.assetReference
         ? { id: edge.source, data: { assetId: edge.assetReference.assetId, customName: edge.assetReference.name } }
@@ -1721,7 +1731,8 @@ export async function mountStudio(host, id) {
           if (kind === "video" && videoReferences().some(reference => reference.assetId === source?.data.assetId)) text.insertReference(source.data.assetId);
           else {
             chooser.hidden = false;
-            fillChooser();
+            referencePickerOpen.add(id);
+            void fillChooser();
           }
         },
         "inline-ref",
@@ -1734,16 +1745,14 @@ export async function mountStudio(host, id) {
         chip.append(preview);
         void (async () => {
           const asset = await readAsset(source.data.assetId);
-          if (asset?.kind === "image" && preview.isConnected) {
+          if (asset && ["image", "video"].includes(asset.kind) && preview.isConnected) {
             let url = urls.get(asset.id);
-            if (!url) {
-              url = URL.createObjectURL(asset.blob);
-              urls.set(asset.id, url);
-            }
-            const img = el("img");
-            img.src = url;
-            img.alt = asset.name;
-            preview.append(img);
+            if (!url) { url = URL.createObjectURL(asset.blob); urls.set(asset.id, url); }
+            const media = el(asset.kind === "image" ? "img" : "video");
+            media.src = url; media.draggable = false;
+            if (asset.kind === "image") media.alt = asset.name;
+            else { media.muted = true; media.preload = "metadata"; preview.append(el("span", "▶", "reference-video-indicator")); }
+            preview.prepend(media);
           }
         })();
       }
@@ -1784,49 +1793,55 @@ export async function mountStudio(host, id) {
         render();
       };
     }
-    function fillChooser() {
+    async function fillChooser() {
+      const version = ++chooserRevision;
       chooser.replaceChildren();
-      const graph = controller.snapshot();
-      for (const source of graph.nodes.filter((s) => s.id !== id))
-        for (const [port, type] of Object.entries(
-          nodeTypes[source.type].outputs,
-        )) {
-          const target = Object.entries(nodeTypes[n.type].inputs).find(
-            ([, t]) => t === type,
-          );
-          if (!target) continue;
-          const exists = graph.edges.find(
-            (e) =>
-              e.source === source.id &&
-              e.sourcePort === port &&
-              e.target === id &&
-              e.targetPort === target[0],
-          );
-          chooser.append(
-            button(
-              (exists ? "✓ " : "＋ ") + (source.data.customName || source.type),
-              () => {
-                if (exists) command({ type: "disconnect", id: exists.id });
-                else
-                  command({
-                    type: "connect",
-                    edge: {
-                      id: crypto.randomUUID(),
-                      source: source.id,
-                      sourcePort: port,
-                      target: id,
-                      targetPort: target[0],
-                    },
-                  });
-              },
-            ),
-          );
+      const heading = el("div", undefined, "reference-picker-heading"),
+        close = button("", () => { chooser.hidden = true; referencePickerOpen.delete(id); });
+      close.append(icon("close")); close.setAttribute("aria-label", "Đóng bảng tham chiếu");
+      heading.append(el("strong", "Ảnh & video trên Canvas"), close);
+      const grid = el("div", undefined, "canvas-reference-grid");
+      chooser.append(heading, grid);
+      const graph = controller.snapshot(), seen = new Set();
+      for (const source of graph.nodes.filter(source => source.id !== id && source.data.assetId)) {
+        try {
+          const asset = await readAsset(source.data.assetId);
+          if (version !== chooserRevision || !chooser.isConnected) return;
+          if (!asset || !["image", "video"].includes(asset.kind) || seen.has(asset.id)) continue;
+          seen.add(asset.id);
+          const output = Object.entries(nodeTypes[source.type].outputs).find(([, type]) => type === asset.kind),
+            input = Object.entries(nodeTypes[n.type].inputs).find(([, type]) => type === asset.kind);
+          if (!output || !input) continue;
+          const existing = graph.edges.find(edge => edge.source === source.id && edge.target === id && edge.sourcePort === output[0] && edge.targetPort === input[0]);
+          const tile = button("", () => {
+            referencePickerOpen.add(id);
+            selection = new Set([id]);
+            if (existing) command({ type: "disconnect", id: existing.id });
+            else command({ type: "connect", edge: { id: crypto.randomUUID(), source: source.id, sourcePort: output[0], target: id, targetPort: input[0] } });
+          }, "canvas-reference-card");
+          tile.setAttribute("aria-label", (asset.kind === "image" ? "Ảnh: " : "Video: ") + asset.name);
+          tile.setAttribute("aria-pressed", String(Boolean(existing)));
+          tile.title = asset.name + (existing ? " · Bấm để bỏ chọn" : " · Bấm để chọn tham chiếu");
+          const preview = el("div", undefined, "canvas-reference-preview"),
+            media = el(asset.kind === "image" ? "img" : "video");
+          let url = urls.get(asset.id);
+          if (!url) { url = URL.createObjectURL(asset.blob); urls.set(asset.id, url); }
+          media.src = url; media.draggable = false;
+          if (asset.kind === "image") media.alt = asset.name;
+          else { media.muted = true; media.preload = "metadata"; }
+          preview.append(media, el("span", asset.kind === "image" ? "Ảnh" : "▶ Video", "reference-kind-badge"));
+          if (existing) preview.append(el("span", "✓", "reference-selected-badge"));
+          tile.append(preview, el("span", asset.name, "reference-file-name"));
+          grid.append(tile);
+        } catch (error) {
+          if (version !== chooserRevision || !chooser.isConnected) return;
+          notice(error.message);
         }
-      if (!chooser.childNodes.length)
-        chooser.append(
-          el("p", "Thêm ảnh hoặc văn bản vào canvas để dùng làm nguồn."),
-        );
+      }
+      if (version === chooserRevision && chooser.isConnected && !grid.childElementCount)
+        grid.append(el("p", "Chưa có ảnh/video trong Canvas. Tải tệp lên hoặc tạo kết quả trước để chọn tham chiếu.", "reference-picker-empty"));
     }
+    if (!chooser.hidden) queueMicrotask(() => void fillChooser());
     return composer;
   }
   function selectedImage() {
@@ -1849,10 +1864,12 @@ export async function mountStudio(host, id) {
     editor.removeAttribute("style");
     if (activeInlinePopup) requestAnimationFrame(positionInlinePopup);
     else if (dockAnchor) requestAnimationFrame(positionDockPopup);
-    editor.replaceChildren(
-      el("h2", title),
-      button("Đóng", () => editor.close()),
-    );
+    const heading = el("div", undefined, "resource-panel-heading"),
+      close = button("", () => editor.close());
+    close.append(icon("close"), el("span", "Đóng"));
+    close.setAttribute("aria-label", "Đóng");
+    heading.append(el("h2", title), close);
+    editor.replaceChildren(heading);
     if (!editor.open) editor.show();
   }
   function showCreationTemplates(targetId) {

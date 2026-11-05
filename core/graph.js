@@ -5,7 +5,7 @@ const dataNodeTypes = {
   videoInput: { inputs: {}, outputs: { video: "video" } },
   generateText: { inputs: { prompt: "text" }, outputs: { text: "text" } },
   generateImage: {
-    inputs: { prompt: "text", reference: "image" },
+    inputs: { prompt: "text", reference: "image", video: "video" },
     outputs: { image: "image" },
   },
   generateVideo: {
