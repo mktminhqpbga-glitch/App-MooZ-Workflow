@@ -32,8 +32,56 @@ export async function mountStudio(host, id) {
     );
     const projects = el("div", undefined, "project-list canvas-project-list");
     toolbar.append(actions);
-    launcher.append(projects);
-    for (const p of await repo.list()) {
+    const pagination = el("nav", undefined, "canvas-pagination");
+    pagination.setAttribute("aria-label", "Phân trang workflow");
+    launcher.append(projects, pagination);
+    let pageNumber = 1, loadRevision = 0;
+    async function showPage(requestedPage) {
+      const revision = ++loadRevision;
+      projects.setAttribute("aria-busy", "true");
+      projects.replaceChildren(el("p", "Đang tải workflow…", "muted"));
+      try {
+        const result = await repo.listPage(requestedPage, 10);
+        if (revision !== loadRevision || !launcher.isConnected) return;
+        pageNumber = result.page;
+        projects.replaceChildren();
+        for (const project of result.items) renderCard(project);
+        if (!result.total) projects.append(el("p", "Chưa có workflow. Tạo dự án mới để bắt đầu.", "muted"));
+        pagination.replaceChildren();
+        if (!result.total) return;
+        const pages = Math.ceil(result.total / result.pageSize);
+        pagination.append(el("span", `${result.total} workflow · Trang ${pageNumber}/${pages}`, "canvas-page-summary"));
+        if (pages === 1) return;
+        const previous = button("← Trước", () => showPage(pageNumber - 1));
+        previous.disabled = pageNumber === 1;
+        pagination.append(previous);
+        const visiblePages = [...new Set([1, ...Array.from({ length: 5 }, (_, i) => pageNumber + i - 2), pages])]
+          .filter(n => n >= 1 && n <= pages).sort((a, b) => a - b);
+        let last = 0;
+        for (const page of visiblePages) {
+          if (last && page > last + 1) pagination.append(el("span", "…"));
+          const control = button(String(page), () => showPage(page));
+          control.setAttribute("aria-label", "Trang " + page);
+          if (page === pageNumber) {
+            control.setAttribute("aria-current", "page");
+            control.disabled = true;
+          }
+          pagination.append(control);
+          last = page;
+        }
+        const next = button("Sau →", () => showPage(pageNumber + 1));
+        next.disabled = pageNumber === pages;
+        pagination.append(next);
+      } catch (e) {
+        if (revision === loadRevision && launcher.isConnected) {
+          projects.replaceChildren(el("p", e.message, "muted"));
+          notice(e.message);
+        }
+      } finally {
+        if (revision === loadRevision) projects.setAttribute("aria-busy", "false");
+      }
+    }
+    function renderCard(p) {
       let current = p;
       const card = el("article", undefined, "project-card canvas-project-card"),
         a = el("a", undefined, "canvas-workflow-title"),
@@ -100,7 +148,7 @@ export async function mountStudio(host, id) {
           const copy = createProject(original.name.slice(0, 90) + " · Bản sao", original.description);
           copy.graph = structuredClone(original.graph);
           await repo.save(copy, { create: true });
-          await mountStudio(host);
+          await showPage(1);
           notice("Đã nhân bản workflow.");
         }),
         button("Tải xuống", async () => {
@@ -115,7 +163,7 @@ export async function mountStudio(host, id) {
         button("Xóa", async () => {
           if (!confirm(`Xóa workflow “${current.name}”? Media trong Kho vẫn được giữ lại.`)) return;
           await repo.delete(current.id, current.revision);
-          card.remove();
+          await showPage(pageNumber);
           notice("Đã xóa workflow.");
         }, "canvas-workflow-delete"),
       );
@@ -123,7 +171,8 @@ export async function mountStudio(host, id) {
       projects.append(card);
       void refreshSize().catch(() => { size.textContent = "Chưa đọc được dung lượng"; });
     }
-    return () => {};
+    await showPage(1);
+    return () => { loadRevision++; };
   }
   let project = await repo.get(id);
   if (!host.isConnected) return () => {};

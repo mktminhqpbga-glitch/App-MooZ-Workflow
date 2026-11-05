@@ -56,9 +56,14 @@ export class ProjectRepository {
   async open() {
     if (this.#db) return;
     this.#db = await new Promise((resolve, reject) => {
-      const r = indexedDB.open("mooz-cvn-projects", 1);
-      r.onupgradeneeded = () =>
-        r.result.createObjectStore("projects", { keyPath: "id" });
+      const r = indexedDB.open("mooz-cvn-projects", 2);
+      r.onupgradeneeded = () => {
+        const store = r.result.objectStoreNames.contains("projects")
+          ? r.transaction.objectStore("projects")
+          : r.result.createObjectStore("projects", { keyPath: "id" });
+        if (!store.indexNames.contains("updatedAt"))
+          store.createIndex("updatedAt", "updatedAt");
+      };
       r.onsuccess = () => {
         r.result.onversionchange = () => {
           r.result.close();
@@ -92,6 +97,40 @@ export class ProjectRepository {
         .get(id);
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
+    });
+  }
+  async listPage(page = 1, pageSize = 10) {
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100)
+      throw Error("Trang workflow không hợp lệ.");
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = this.#db.transaction("projects"),
+        store = tx.objectStore("projects"),
+        count = store.count(),
+        items = [];
+      let total = 0, currentPage = 1;
+      count.onsuccess = () => {
+        total = count.result;
+        currentPage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+        if (!total) return;
+        const request = store.index("updatedAt").openCursor(null, "prev");
+        let skip = (currentPage - 1) * pageSize;
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return;
+          if (skip) {
+            const offset = skip;
+            skip = 0;
+            cursor.advance(offset);
+            return;
+          }
+          items.push(cursor.value);
+          if (items.length < pageSize) cursor.continue();
+        };
+      };
+      tx.oncomplete = () => resolve({ items, total, page: currentPage, pageSize });
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || Error("Chưa tải được trang workflow."));
     });
   }
   async save(project, { create = false } = {}) {

@@ -864,15 +864,16 @@ select {
 .canvas-project-list {
   margin-top: 0;
   gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
 }
 .canvas-project-card {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 18px;
+  gap: 14px;
   min-height: 88px;
-  padding: 22px;
+  padding: 16px;
 }
 .canvas-project-card strong {
   min-width: 0;
@@ -902,33 +903,75 @@ select {
 .canvas-workflow-description::placeholder { color: var(--muted); }
 .canvas-workflow-metadata {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 16px;
+  grid-template-columns: 1fr;
+  gap: 9px;
   margin: 0;
 }
+.canvas-workflow-metadata > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
 .canvas-workflow-metadata dt {
-  margin-bottom: 6px;
+  margin: 0;
+  flex-shrink: 0;
   color: var(--muted);
   font-size: 11px;
 }
 .canvas-workflow-metadata dd {
   margin: 0;
+  text-align: right;
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .canvas-workflow-actions {
-  gap: 8px;
-  padding-top: 16px;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 .canvas-workflow-actions button {
-  min-height: 36px;
+  min-height: 32px;
+  padding: 7px 9px;
+  font-size: 11px;
   background: var(--raised);
 }
 .canvas-workflow-actions .canvas-workflow-delete {
   color: #d66969;
   background: transparent;
+}
+.canvas-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 24px;
+}
+.canvas-page-summary {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.canvas-pagination button {
+  min-width: 34px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.canvas-pagination button[aria-current="page"] {
+  background: var(--ink);
+  color: var(--bg);
+  opacity: 1;
+}
+.canvas-pagination button:disabled:not([aria-current="page"]) {
+  opacity: .4;
+  cursor: default;
+}
+@media (min-width: 701px) and (max-width: 1050px) {
+  .canvas-project-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* Desktop navigation stays compact and expands over the page on hover/focus. */
 @media (min-width: 701px) {
