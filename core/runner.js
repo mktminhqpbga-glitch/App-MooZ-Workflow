@@ -365,10 +365,15 @@ export async function inspectJob(id) {
   if (!job || job.status !== "unknown") return job;
   const nodeId = job.activeNode,
     requestId = job.requests[nodeId];
-  if (!requestId)
-    throw Error(
-      "Lượt chưa có mã gửi. Đối chiếu đầu vào trước khi tạo tác vụ mới.",
-    );
+  if (!requestId) {
+    const node = job.graph.nodes.find(item => item.id === nodeId);
+    if (node && localTypes.has(node.type) && !['voiceover','transcribe'].includes(node.type)) {
+      job.status = 'review';
+      job.error = 'Bước local bị gián đoạn, chưa gửi AI. Các checkpoint được giữ; bạn có thể tiếp tục phần còn thiếu.';
+      await write('jobs', job); return job;
+    }
+    throw Error("Lượt chưa có mã gửi. Đối chiếu đầu vào trước khi tạo tác vụ mới.");
+  }
   const result = await api("jobs/" + requestId);
   if(result.status==='error') { job.status='error';job.requestStates||={};job.requestStates[nodeId]='error';job.error=result.error||'Máy chủ xác nhận lượt chưa được gửi thành công.';await write('jobs',job);return job; }
   if (result.status !== "success")

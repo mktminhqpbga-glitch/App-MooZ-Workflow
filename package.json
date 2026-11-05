@@ -10,9 +10,9 @@
     "test:review": "node tests/canvas-review.browser.cjs",
     "test:browser": "node tests/projects.browser.cjs && node tests/workspace.browser.cjs && node tests/media.browser.cjs && node tests/inline.browser.cjs && node tests/image-tools.browser.cjs",
     "start:desktop": "electron .",
-    "package:mac": "electron-builder --mac --x64",
-    "package:mac:zip": "electron-builder --mac zip --x64",
-    "package:linux:test": "electron-builder --linux dir",
+    "package:mac": "electron-builder --mac --x64 --publish never",
+    "package:mac:zip": "electron-builder --mac zip --x64 --publish never",
+    "package:linux:test": "electron-builder --linux dir --publish never",
     "test:local-media": "node tests/local-media.browser.cjs",
     "test:packaged": "node tests/packaged.browser.cjs",
     "test:all": "npm test && npm run test:browser && node tests/canvas-review.browser.cjs && node tests/queue-flow.browser.cjs && node tests/local-media.browser.cjs"
