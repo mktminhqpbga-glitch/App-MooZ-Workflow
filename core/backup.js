@@ -41,7 +41,7 @@ export async function importBundle(text) {
     data.assets.length > 1000
   )
     throw Error("Bản sao lưu không hợp lệ.");
-  const project = createProject(data.name),
+  const project = createProject(data.name, data.description),
     graph = validateGraph(data.graph),
     map = new Map(),
     created = [];

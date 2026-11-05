@@ -5,13 +5,20 @@ const validateName = (value) => {
     throw Error("Tên dự án cần từ 1 đến 100 ký tự.");
   return value.trim();
 };
-export function createProject(name) {
+const validateDescription = (value = "") => {
+  if (typeof value !== "string" || value.length > 2000)
+    throw Error("Mô tả workflow tối đa 2.000 ký tự.");
+  return value.trim();
+};
+export function createProject(name, description = "") {
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     schemaVersion,
     name: validateName(name),
+    description: validateDescription(description),
     createdAt: now,
+    lastOpenedAt: null,
     updatedAt: now,
     revision: 1,
     graph: emptyGraph(),
@@ -23,6 +30,7 @@ export function exportProject(project) {
       format: "mooz-cvn-project",
       schemaVersion,
       name: validateName(project.name),
+      description: validateDescription(project.description),
       graph: validateGraph(project.graph),
     },
     null,
@@ -38,7 +46,7 @@ export function importProject(text) {
     data.schemaVersion !== schemaVersion
   )
     throw Error("Định dạng hoặc phiên bản dự án chưa hỗ trợ.");
-  const project = createProject(data.name);
+  const project = createProject(data.name, data.description);
   project.graph = validateGraph(data.graph);
   return project;
 }
@@ -92,6 +100,8 @@ export class ProjectRepository {
       id: project.id,
       schemaVersion,
       name: validateName(project.name),
+      description: validateDescription(project.description),
+      lastOpenedAt: project.lastOpenedAt || null,
       graph: validateGraph(project.graph),
       createdAt: project.createdAt,
       updatedAt: new Date().toISOString(),
@@ -125,6 +135,26 @@ export class ProjectRepository {
       tx.onerror = () => reject(error || tx.error);
       tx.onabort = () =>
         reject(error || tx.error || Error("Chưa lưu được dự án."));
+    });
+  }
+  async delete(id, revision) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = this.#db.transaction("projects", "readwrite"),
+        store = tx.objectStore("projects"),
+        request = store.get(id);
+      let error;
+      request.onsuccess = () => {
+        if (!request.result || request.result.revision !== revision) {
+          error = Error("Workflow đã thay đổi. Hãy tải lại danh sách trước khi xóa.");
+          tx.abort();
+          return;
+        }
+        store.delete(id);
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(error || tx.error);
+      tx.onabort = () => reject(error || tx.error || Error("Chưa xóa được workflow."));
     });
   }
 }

@@ -2,7 +2,7 @@ import { availableImageTools } from "./core/capabilities.js";
 import { icon } from "./icons.js";
 import { openImageTool } from "./image-workbench.js";
 import { exportBundle } from "./core/backup.js";
-import { ProjectRepository, createProject } from "./core/projects.js";
+import { ProjectRepository, createProject, exportProject } from "./core/projects.js";
 import { GraphController, nodeTypes } from "./core/graph.js";
 import {
   addAsset,
@@ -32,10 +32,94 @@ export async function mountStudio(host, id) {
     const projects = el("div", undefined, "project-list canvas-project-list");
     launcher.append(actions, projects);
     for (const p of await repo.list()) {
-      const a = el("a", undefined, "project-card canvas-project-card");
+      let current = p;
+      const card = el("article", undefined, "project-card canvas-project-card"),
+        a = el("a", undefined, "canvas-workflow-title"),
+        description = el("textarea", undefined, "canvas-workflow-description"),
+        metadata = el("dl", undefined, "canvas-workflow-metadata"),
+        controls = el("div", undefined, "project-actions canvas-workflow-actions");
       a.append(el("strong", p.name));
       a.href = "#canvas/" + p.id;
-      projects.append(a);
+      description.value = p.description || "";
+      description.placeholder = "Thêm mô tả workflow…";
+      description.maxLength = 2000;
+      description.rows = 2;
+      description.setAttribute("aria-label", "Mô tả " + p.name);
+      description.onchange = async () => {
+        description.disabled = true;
+        try {
+          current = await repo.save({ ...current, description: description.value });
+          description.value = current.description;
+          await refreshSize();
+          notice("Đã lưu mô tả workflow.");
+        } catch (e) {
+          notice(e.message);
+        } finally {
+          description.disabled = false;
+        }
+      };
+      const dateText = (date) => date ? new Date(date).toLocaleString("vi-VN") : "Chưa mở";
+      for (const [label, value] of [
+        ["Thời gian tạo", dateText(p.createdAt)],
+        ["Vào gần nhất", dateText(p.lastOpenedAt)],
+      ]) {
+        const row = el("div");
+        row.append(el("dt", label), el("dd", value));
+        metadata.append(row);
+      }
+      const sizeRow = el("div"), size = el("dd", "Đang tính…");
+      sizeRow.append(el("dt", "Dung lượng workflow"), size);
+      size.title = "Dữ liệu workflow và media tham chiếu, mỗi tệp chỉ tính một lần; không gồm dung lượng quản lý của trình duyệt.";
+      metadata.append(sizeRow);
+      async function refreshSize() {
+        let bytes = new Blob([JSON.stringify(current)]).size, missing = 0;
+        const ids = new Set(current.graph.nodes.flatMap(n => [
+          n.data.assetId,
+          ...(n.data.resultAssets ? JSON.parse(n.data.resultAssets) : []),
+        ]).filter(Boolean));
+        for (const id of ids) {
+          const asset = await readAsset(id);
+          if (asset) bytes += asset.blob.size;
+          else missing++;
+        }
+        const units = ["B", "KB", "MB", "GB"];
+        let unit = 0;
+        while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
+        size.textContent = bytes.toLocaleString("vi-VN", { maximumFractionDigits: unit ? 2 : 0 }) + " " + units[unit] + (missing ? ` · thiếu ${missing} tệp` : "");
+      }
+      controls.append(
+        button("Mở workflow", () => { location.hash = "canvas/" + current.id; }),
+        button("Sao chép", async () => {
+          await navigator.clipboard.writeText(exportProject(await repo.get(p.id)));
+          notice("Đã sao chép JSON workflow; media gốc không nằm trong clipboard.");
+        }),
+        button("Nhân bản", async () => {
+          const original = await repo.get(p.id);
+          const copy = createProject(original.name.slice(0, 90) + " · Bản sao", original.description);
+          copy.graph = structuredClone(original.graph);
+          await repo.save(copy, { create: true });
+          await mountStudio(host);
+          notice("Đã nhân bản workflow.");
+        }),
+        button("Tải xuống", async () => {
+          const original = await repo.get(p.id);
+          const blob = new Blob([await exportBundle(original)], { type: "application/json" });
+          const url = URL.createObjectURL(blob), link = el("a");
+          link.href = url;
+          link.download = "MooZ-CVN-" + original.id + ".json";
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }),
+        button("Xóa", async () => {
+          if (!confirm(`Xóa workflow “${current.name}”? Media trong Kho vẫn được giữ lại.`)) return;
+          await repo.delete(current.id, current.revision);
+          card.remove();
+          notice("Đã xóa workflow.");
+        }, "canvas-workflow-delete"),
+      );
+      card.append(a, description, metadata, controls);
+      projects.append(card);
+      void refreshSize().catch(() => { size.textContent = "Chưa đọc được dung lượng"; });
     }
     return () => {};
   }
@@ -45,6 +129,8 @@ export async function mountStudio(host, id) {
     host.textContent = "Không tìm thấy dự án.";
     return () => {};
   }
+  project = await repo.save({ ...project, lastOpenedAt: new Date().toISOString() });
+  if (!host.isConnected) return () => {};
   let controller = new GraphController(project.graph),
     selection = new Set(),
     urls = new Map(),

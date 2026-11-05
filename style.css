@@ -799,7 +799,9 @@ select {
 }
 .canvas-project-card {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
   min-height: 88px;
   padding: 22px;
 }
@@ -807,6 +809,57 @@ select {
   min-width: 0;
   font-size: 15px;
   line-height: 1.5;
+}
+.canvas-workflow-title {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+.canvas-workflow-title:hover { text-decoration: underline; }
+.canvas-workflow-description {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.canvas-workflow-description::placeholder { color: var(--muted); }
+.canvas-workflow-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+.canvas-workflow-metadata dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.canvas-workflow-metadata dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.canvas-workflow-actions {
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.canvas-workflow-actions button {
+  min-height: 36px;
+  background: var(--raised);
+}
+.canvas-workflow-actions .canvas-workflow-delete {
+  color: #d66969;
+  background: transparent;
 }
 .project-stats {
   display: flex;
