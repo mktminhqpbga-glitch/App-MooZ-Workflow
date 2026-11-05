@@ -1,5 +1,5 @@
 // Portable graph contract: no DOM, Electron or provider access.
-export const nodeTypes = Object.freeze({
+const dataNodeTypes = {
   prompt: { inputs: {}, outputs: { text: "text" } },
   imageInput: { inputs: {}, outputs: { image: "image" } },
   videoInput: { inputs: {}, outputs: { video: "video" } },
@@ -13,7 +13,14 @@ export const nodeTypes = Object.freeze({
     outputs: { video: "video" },
   },
   preview: { inputs: { media: "media" }, outputs: {} },
-});
+};
+// Every node can participate in workflow ordering; native data ports keep their types.
+export const nodeTypes = Object.freeze(Object.fromEntries(
+  Object.entries(dataNodeTypes).map(([name, definition]) => [name, {
+    inputs: { ...definition.inputs, workflow: "flow" },
+    outputs: { ...definition.outputs, workflow: "flow" },
+  }]),
+));
 const allowed = [
   "customName",
   "text",
@@ -25,9 +32,19 @@ const allowed = [
   "expectedKind",
   "stylePrompt",
   "cameraPrompt",
+  "cameraBody",
+  "cameraLens",
+  "cameraFocal",
+  "cameraAperture",
+  "cameraEnabled",
+  "motionPrompt",
+  "effectPrompt",
   "quality",
+  "resolution",
+  "background",
   "count",
   "resultAssets",
+  "referenceOrder",
 ];
 export const emptyGraph = () => ({
   nodes: [],
@@ -70,7 +87,7 @@ export function validateGraph(value) {
     for (const key of allowed) {
       if (!Object.hasOwn(n.data, key)) continue;
       const v = n.data[key];
-      if (key === "resultAssets") {
+      if (["resultAssets", "referenceOrder"].includes(key)) {
         let ids;
         try {
           ids = JSON.parse(v);
@@ -82,8 +99,14 @@ export function validateGraph(value) {
       } else if (key === "count") {
         if (![1, 2, 4].includes(v)) throw Error("Số ảnh cần là 1, 2 hoặc 4.");
       } else if (key === "quality") {
-        if (!["low", "medium", "high"].includes(v))
+        if (!["low", "medium", "high", "ultra", "max"].includes(v))
           throw Error("Chất lượng không hợp lệ.");
+      } else if (key === "resolution") {
+        if (!["1K", "2K", "4K", "480P", "720P", "1080P"].includes(v))
+          throw Error("Độ phân giải không hợp lệ.");
+      } else if (key === "background") {
+        if (!["auto", "preserve", "transparent"].includes(v))
+          throw Error("Nền ảnh không hợp lệ.");
       } else if (key === "duration") {
         if (v !== null && (!Number.isInteger(v) || v < 1 || v > 120))
           throw Error("Thời lượng không hợp lệ.");
@@ -125,7 +148,7 @@ export function validateGraph(value) {
     )
       throw Error("Dây nối đã tồn tại.");
     if (
-      e.targetPort !== "reference" &&
+      !["reference", "workflow"].includes(e.targetPort) &&
       edges.some(
         (old) => old.target === e.target && old.targetPort === e.targetPort,
       )

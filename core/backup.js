@@ -1,17 +1,13 @@
 import { createProject, exportProject } from "./projects.js";
 import { readAsset, toDataURL, addAsset, remove } from "./storage.js";
 import { validateGraph } from "./graph.js";
+import { nodeAssetIds, remapPromptAssets } from "./references.js";
 export async function exportBundle(project) {
   const clean = JSON.parse(exportProject(project)),
     assets = [];
   let bytes = 0;
   for (const id of new Set(
-    clean.graph.nodes
-      .flatMap((n) => [
-        n.data.assetId,
-        ...(n.data.resultAssets ? JSON.parse(n.data.resultAssets) : []),
-      ])
-      .filter(Boolean),
+    clean.graph.nodes.flatMap(nodeAssetIds),
   )) {
     const a = await readAsset(id);
     if (!a)
@@ -82,6 +78,11 @@ export async function importBundle(text) {
           throw Error("Bản sao lưu thiếu kết quả tạo ảnh.");
         n.data.resultAssets = JSON.stringify(ids.map((id) => map.get(id)));
       }
+    for (const node of graph.nodes) {
+      if (node.data.studioPrompt) node.data.studioPrompt = remapPromptAssets(node.data.studioPrompt, map);
+      if (node.data.referenceOrder)
+        node.data.referenceOrder = JSON.stringify(JSON.parse(node.data.referenceOrder).filter(id => map.has(id)).map(id => map.get(id)));
+    }
     project.graph = graph;
     return { project, created };
   } catch (e) {

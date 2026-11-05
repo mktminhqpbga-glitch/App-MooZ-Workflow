@@ -1,4 +1,11 @@
 const paths = {
+  video: "M5 3h10v18H5zM15 9l6-4v14l-6-4zM8 7h4M8 17h4",
+  sparkles: "m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3zM20 2v4M18 4h4",
+  motion: "M3 9h10v9H3zM13 12l5-3v9l-5-3M5 5h13M15 2l3 3-3 3",
+  model: "M12 8c-8-8-13 4-5 7 2 7 13 4 10-3 8-8-4-13-7-5-7 2-4 13 3 10M8 8l8 8M16 8l-8 8",
+  frame: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z",
+  chevronUp: "m6 15 6-6 6 6",
+  chevronDown: "m6 9 6 6 6-6",
   image: "M3 3h18v18H3zM3 17l5-6 5 5 3-4 5 6M15 7h.01",
   upload: "M12 16V3M7 8l5-5 5 5M3 15v6h18v-6",
   reference: "M4 4h16v12h-7l-4 5v-5H4zM8 8h8M8 12h5",

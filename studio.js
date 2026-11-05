@@ -1,6 +1,9 @@
+import { nodeAssetIds, promptAssetIds } from "./core/references.js";
 import { availableImageTools } from "./core/capabilities.js";
 import { icon } from "./icons.js";
 import { openImageTool } from "./image-workbench.js";
+import { createVideoPrompt } from "./video-prompt.js";
+import { captureFrame } from "./media-tools.js";
 import { exportBundle } from "./core/backup.js";
 import { ProjectRepository, createProject, exportProject } from "./core/projects.js";
 import { GraphController, nodeTypes } from "./core/graph.js";
@@ -123,10 +126,7 @@ export async function mountStudio(host, id) {
       metadata.append(sizeRow);
       async function refreshSize() {
         let bytes = new Blob([JSON.stringify(current)]).size, missing = 0;
-        const ids = new Set(current.graph.nodes.flatMap(n => [
-          n.data.assetId,
-          ...(n.data.resultAssets ? JSON.parse(n.data.resultAssets) : []),
-        ]).filter(Boolean));
+        const ids = new Set(current.graph.nodes.flatMap(nodeAssetIds));
         for (const id of ids) {
           const asset = await readAsset(id);
           if (asset) bytes += asset.blob.size;
@@ -197,7 +197,10 @@ export async function mountStudio(host, id) {
     activeJobs = new Map(),
     batches = new Map();
   let panMode = false,
-    connectionCapabilities = null;
+    connectionCapabilities = null,
+    pendingLink = null,
+    linkDrag = null,
+    suppressPortClickUntil = 0;
   void api("status")
     .then((value) => {
       if (!disposed) {
@@ -525,6 +528,15 @@ export async function mountStudio(host, id) {
         media.preload = "metadata";
       } else media.alt = a.name;
       container.replaceChildren(media);
+      if (media.tagName === "VIDEO") media.addEventListener("loadedmetadata", () => {
+        const node = container.closest(".cvn-node");
+        if (!node) return;
+        const label = node.querySelector(".cvn-dimensions") || el("span", undefined, "cvn-dimensions");
+        label.textContent = media.videoWidth + " × " + media.videoHeight;
+        node.append(label);
+        renderContext();
+        scheduleWires();
+      }, { once: true });
       media.addEventListener(
         "load",
         () => {
@@ -580,9 +592,9 @@ export async function mountStudio(host, id) {
         title = el("div", n.data.customName || n.type, "cvn-node-title"),
         body = el("div", undefined, "cvn-node-body");
       card.dataset.id = n.id;
-      if (n.type === "generateImage") {
-        card.classList.add("image-generation-node");
-        title.prepend(icon("image"));
+      if (["generateImage", "generateVideo"].includes(n.type)) {
+        card.classList.add(n.type === "generateImage" ? "image-generation-node" : "video-generation-node");
+        title.prepend(icon(n.type === "generateImage" ? "image" : "video"));
       }
       Object.assign(card.style, { left: n.x + "px", top: n.y + "px" });
       card.append(title, body);
@@ -608,7 +620,8 @@ export async function mountStudio(host, id) {
       } else {
         const placeholder = el("span", undefined, "cvn-empty-symbol");
         if (n.type === "generateImage") placeholder.append(icon("image"));
-        else placeholder.textContent = n.type === "generateVideo" ? "▷" : "▧";
+        else if (n.type === "generateVideo") placeholder.append(icon("video"));
+        else placeholder.textContent = "▧";
         body.append(
           placeholder,
           el(
@@ -684,34 +697,50 @@ export async function mountStudio(host, id) {
           const p = button(
             "+",
             () => {
-              if (side === "input" && n.type.startsWith("generate")) {
-                card
-                  .querySelector(".inline-tools button:nth-child(2)")
-                  ?.click();
-              } else {
-                const old = card.querySelector(".port-menu");
-                if (old) {
-                  old.remove();
-                  return;
-                }
-                const menu = el("div", undefined, "port-menu");
-                for (const [type, label] of [
-                  ["generateImage", "Tạo ảnh"],
-                  ["generateVideo", "Tạo video"],
-                ]) {
-                  const accepted = Object.values(nodeTypes[type].inputs);
-                  if (
-                    Object.values(nodeTypes[n.type].outputs).some((output) =>
-                      accepted.includes(output),
-                    )
-                  )
-                    menu.append(button(label, () => addNode(type, n.id)));
-                }
-                card.append(menu);
+              if (performance.now() < suppressPortClickUntil) return;
+              if (pendingLink && pendingLink.side !== side && pendingLink.id !== n.id) {
+                const sourceId = side === "input" ? pendingLink.id : n.id;
+                const targetId = side === "input" ? n.id : pendingLink.id;
+                pendingLink = null;
+                connectNodes(sourceId, targetId);
+                return;
               }
+              pendingLink = { id: n.id, side };
+              for (const old of stage.querySelectorAll(".port-menu")) old.remove();
+              const menu = el("div", undefined, "port-menu");
+              menu.append(el("small", side === "output" ? "Nối tới node có sẵn" : "Nhận từ node có sẵn"));
+              for (const candidate of controller.snapshot().nodes.filter(row => row.id !== n.id)) {
+                const sourceId = side === "output" ? n.id : candidate.id;
+                const targetId = side === "input" ? n.id : candidate.id;
+                const pair = connectionPair(sourceId, targetId);
+                const connected = controller.snapshot().edges.some(edge => edge.source === sourceId && edge.target === targetId);
+                const item = button((connected ? "✓ " : "") + (candidate.data.customName || candidate.type), () => {
+                  pendingLink = null;
+                  connectNodes(sourceId, targetId, true);
+                });
+                item.title = connected ? "Bấm để bỏ nối" : pair?.targetPort === "workflow" ? "Liên kết thứ tự workflow" : "Truyền dữ liệu " + pair?.sourcePort;
+                menu.append(item);
+              }
+              if (side === "output") {
+                menu.append(el("small", "Hoặc tạo bước tiếp theo"));
+                for (const [type, label] of [["generateImage", "Tạo ảnh"], ["generateVideo", "Tạo video"], ["generateText", "Tạo văn bản"]])
+                  menu.append(button(label, () => { pendingLink = null; return addNode(type, n.id); }));
+              }
+              card.append(menu);
+              status.textContent = "Chọn cổng đối diện để nối · Esc để hủy";
             },
             "cvn-port " + side,
           );
+          p.dataset.side = side;
+          p.onpointerdown = (event) => {
+            if (panMode || event.button !== 0) return;
+            event.stopPropagation();
+            selection = new Set([n.id]);
+            renderContext();
+            linkDrag = { id: n.id, side, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
+            p.setPointerCapture(event.pointerId);
+            scheduleWires();
+          };
           p.title = Object.keys(ports).join(", ");
           p.setAttribute(
             "aria-label",
@@ -814,21 +843,55 @@ export async function mountStudio(host, id) {
       const a = stage.querySelector(`[data-id="${CSS.escape(e.source)}"]`),
         b = stage.querySelector(`[data-id="${CSS.escape(e.target)}"]`);
       if (!a || !b) continue;
-      const x = a.offsetLeft + a.offsetWidth,
-        y =
-          a.offsetTop +
-          (a.querySelector(".cvn-node-body")?.offsetHeight || 240) / 2,
-        tx = b.offsetLeft,
-        ty =
-          b.offsetTop +
-          (b.querySelector(".cvn-node-body")?.offsetHeight || 240) / 2,
+      const start = portCenter(a, "output"), end = portCenter(b, "input");
+      if (!start || !end) continue;
+      const x = start.x, y = start.y, tx = end.x, ty = end.y,
         path = document.createElementNS(wires.namespaceURI, "path");
       path.setAttribute(
         "d",
         `M${x} ${y} C${x + 100} ${y},${tx - 100} ${ty},${tx} ${ty}`,
       );
+      if (e.targetPort === "workflow") path.classList.add("workflow-order-wire");
       wires.append(path);
     }
+    if (linkDrag) {
+      const card = stage.querySelector(`[data-id="${CSS.escape(linkDrag.id)}"]`),
+        start = card && portCenter(card, linkDrag.side),
+        rect = stage.getBoundingClientRect();
+      if (start) {
+        const x = (linkDrag.x - rect.left) / pan.zoom, y = (linkDrag.y - rect.top) / pan.zoom,
+          path = document.createElementNS(wires.namespaceURI, "path");
+        path.setAttribute("d", `M${start.x} ${start.y} C${start.x + (linkDrag.side === "output" ? 100 : -100)} ${start.y},${x} ${y},${x} ${y}`);
+        path.classList.add("connection-draft-wire");
+        wires.append(path);
+      }
+    }
+  }
+  function portCenter(card, side) {
+    const port = card.querySelector(`:scope > .cvn-port.${side}`);
+    if (!port) return null;
+    const rect = port.getBoundingClientRect(), origin = stage.getBoundingClientRect();
+    return { x: (rect.left + rect.width / 2 - origin.left) / pan.zoom, y: (rect.top + rect.height / 2 - origin.top) / pan.zoom };
+  }
+  function connectionPair(sourceId, targetId) {
+    const nodes = controller.snapshot().nodes,
+      source = nodes.find(row => row.id === sourceId), target = nodes.find(row => row.id === targetId);
+    if (!source || !target) throw Error("Node đã bị xóa.");
+    for (const [sourcePort, type] of Object.entries(nodeTypes[source.type].outputs)) {
+      const accepted = Object.entries(nodeTypes[target.type].inputs).find(([, input]) => input === type || input === "media" && ["image", "video", "audio", "media"].includes(type));
+      if (accepted) return { sourcePort, targetPort: accepted[0] };
+    }
+  }
+  function connectNodes(source, target, toggle = false) {
+    if (source === target) throw Error("Chọn hai node khác nhau để nối.");
+    const pair = connectionPair(source, target);
+    if (!pair) throw Error("Chưa tìm thấy cổng nối.");
+    const existing = controller.snapshot().edges.find(edge => edge.source === source && edge.target === target && edge.sourcePort === pair.sourcePort && edge.targetPort === pair.targetPort);
+    if (existing && !toggle) { notice("Hai node này đã được nối."); return; }
+    if (existing) command({ type: "disconnect", id: existing.id });
+    else command({ type: "connect", edge: { id: crypto.randomUUID(), source, target, ...pair } });
+    status.textContent = existing ? "Đã bỏ nối" : pair.targetPort === "workflow" ? "Đã nối thứ tự workflow" : "Đã nối dữ liệu";
+    if (!existing && pair.targetPort === "workflow") notice("Đã nối thứ tự workflow. Hai loại dữ liệu này không được tự chuyển đổi.");
   }
   function setPreviewRatio(body, value) {
     const [width, height] = value.split(":").map(Number);
@@ -861,18 +924,76 @@ export async function mountStudio(host, id) {
     const n = controller.snapshot().nodes.find((n) => selection.has(n.id));
     if (!n?.data.assetId) return;
     const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`);
-    if (!card?.querySelector("img")) return;
+    const image = card?.querySelector(".cvn-node-body > img"),
+      video = card?.querySelector(".cvn-node-body > video");
+    if (!image && !video) return;
     context.hidden = false;
-    context.setAttribute("aria-label", "Công cụ ảnh đã chọn");
-    for (const { label, icon: name, mode } of availableImageTools(
-      connectionCapabilities,
-    )) {
-      const b = button("", () => imageTool(n, mode));
-      b.append(icon(name));
-      b.title = label;
-      b.setAttribute("aria-label", label);
-      if (["edit", "grid"].includes(mode)) b.append(el("span", label));
-      context.append(b);
+    context.classList.toggle("cvn-video-toolbar", Boolean(video));
+    context.setAttribute("aria-label", video ? "Công cụ video đã chọn" : "Công cụ ảnh đã chọn");
+    let downloadHost = context, trailingAction = null;
+    if (video) {
+      const capture = el("details", undefined, "video-frame-menu"),
+        label = el("summary"), choices = el("div");
+      label.append(icon("camera"), el("span", "Chụp khung hình"), icon("chevronDown"));
+      label.setAttribute("aria-label", "Chụp khung hình video");
+      for (const [text, time] of [
+        ["Khung hình hiện tại", () => video.currentTime || 0],
+        ["Khung hình đầu tiên", () => 0],
+        ["Khung hình cuối cùng", () => Number.isFinite(video.duration) ? Math.max(0, video.duration - .05) : 0],
+      ]) choices.append(button(text, async () => {
+        const asset = await readAsset(n.data.assetId);
+        const output = await captureFrame(asset, time());
+        capture.open = false;
+        await addAssetNode(output);
+      }));
+      capture.append(label, choices);
+      const fullscreen = button("", async () => {
+        if (video.requestFullscreen) await video.requestFullscreen();
+        else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        else throw Error("Trình duyệt chưa hỗ trợ mở video toàn màn hình.");
+      });
+      fullscreen.append(icon("expand"));
+      fullscreen.title = "Xem video toàn màn hình";
+      fullscreen.setAttribute("aria-label", "Xem video toàn màn hình");
+      context.append(capture);
+      trailingAction = fullscreen;
+    } else {
+      const primary = el("div", undefined, "image-primary-tools"),
+        utilities = el("div", undefined, "image-utility-tools"),
+        tools = availableImageTools(connectionCapabilities);
+      const action = tool => {
+        const b = button("", () => imageTool(n, tool.mode));
+        b.append(icon(tool.icon));
+        b.title = tool.label;
+        b.setAttribute("aria-label", tool.label);
+        if (["edit", "grid"].includes(tool.mode)) b.append(el("span", tool.mode === "edit" ? "Chỉnh sửa ảnh" : tool.label));
+        return b;
+      };
+      for (const tool of tools.filter(tool => !["rotate", "draw", "view"].includes(tool.mode))) primary.append(action(tool));
+      const more = el("details", undefined, "image-more-menu"),
+        label = el("summary"), menu = el("div");
+      label.append(el("span", "Thêm"), icon("chevronDown"));
+      label.setAttribute("aria-label", "Thêm công cụ ảnh");
+      menu.append(
+        button("Cắt và điều chỉnh ảnh", () => { more.open = false; return imageTool(n, "edit"); }),
+        button("Thông tin ảnh", async () => {
+          more.open = false;
+          const asset = await readAsset(n.data.assetId);
+          if (!asset) throw Error("Ảnh không còn trong Kho.");
+          resourcePanel("Thông tin ảnh");
+          editor.append(el("p", asset.name), el("p", `${image.naturalWidth} × ${image.naturalHeight} px`), el("p", asset.blob.type + " · " + (asset.blob.size / 1024).toLocaleString("vi-VN", { maximumFractionDigits: 1 }) + " KB"));
+        }),
+      );
+      more.append(label, menu);
+      primary.append(more);
+      for (const mode of ["rotate", "draw"]) {
+        const tool = tools.find(tool => tool.mode === mode);
+        if (tool) utilities.append(action(tool));
+      }
+      const view = tools.find(tool => tool.mode === "view");
+      if (view) trailingAction = action(view);
+      context.append(primary, utilities);
+      downloadHost = utilities;
     }
     const download = button("", async () => {
       const a = await readAsset(n.data.assetId);
@@ -882,10 +1003,11 @@ export async function mountStudio(host, id) {
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     });
-    download.setAttribute("aria-label", "Tải ảnh xuống");
+    download.setAttribute("aria-label", video ? "Tải video xuống" : "Tải ảnh xuống");
     download.title = "Tải xuống";
     download.append(icon("download"));
-    context.append(download);
+    downloadHost.append(download);
+    if (trailingAction) downloadHost.append(trailingAction);
     context.style.top = "88px";
   }
   function updateInline(id, patch) {
@@ -897,7 +1019,7 @@ export async function mountStudio(host, id) {
   }
   function openEditor(id) {
     const card = stage.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    card?.querySelector("textarea")?.focus({ preventScroll: true });
+    card?.querySelector('textarea,[contenteditable="true"]')?.focus({ preventScroll: true });
   }
   function makeComposer(n) {
     const id = n.id,
@@ -909,6 +1031,8 @@ export async function mountStudio(host, id) {
             : "text";
     const composer = el("section", undefined, "inline-composer");
     if (kind === "image") composer.classList.add("image-prompt-composer");
+    if (kind === "video") composer.classList.add("video-prompt-composer");
+    if (kind !== "text") composer.classList.add("media-prompt-composer");
     composer.setAttribute(
       "aria-label",
       "Prompt " + (n.data.customName || n.type),
@@ -1001,7 +1125,27 @@ export async function mountStudio(host, id) {
         );
       tools.append(button("Phong cách", () => showStyles(id)));
     }
-    const text = el("textarea");
+    if (kind === "video") tools.append(
+      button("Nhân vật", () => showCharacters()),
+      button("Hiệu ứng", () => showVideoHints(id, "effect")),
+      button("Chuyển động máy", () => showVideoHints(id, "motion")),
+    );
+    function videoReferences() {
+      const graph = controller.snapshot(), currentNode = graph.nodes.find(row => row.id === id);
+      const sources = graph.edges.filter(edge => edge.target === id && edge.targetPort === "reference")
+        .map(edge => graph.nodes.find(node => node.id === edge.source))
+        .filter(node => node?.data.assetId && ["imageInput", "generateImage"].includes(node.type));
+      const available = new Set([...sources.map(node => node.data.assetId), ...promptAssetIds(currentNode?.data.studioPrompt)]);
+      const savedOrder = currentNode?.data.referenceOrder ? JSON.parse(currentNode.data.referenceOrder) : [];
+      const assetIds = [...new Set([...savedOrder.filter(assetId => available.has(assetId)), ...available])];
+      return assetIds.map((assetId, index) => {
+        const node = sources.find(node => node.data.assetId === assetId);
+        return { id: assetId, nodeId: node?.id, name: node?.data.customName || "Ảnh tham chiếu", assetId, label: "Ảnh " + (index + 1), number: index + 1 };
+      });
+    }
+    const text = kind === "video"
+      ? createVideoPrompt({ value: n.data.studioPrompt || "", getReferences: videoReferences, onChange: value => updateInline(id, { studioPrompt: value }) })
+      : el("textarea");
     text.value = n.data.studioPrompt || "";
     text.placeholder =
       kind === "video"
@@ -1009,7 +1153,7 @@ export async function mountStudio(host, id) {
         : "Nhập mô tả để tạo ảnh, hoặc tải ảnh lên và viết yêu cầu chỉnh sửa, ví dụ: đổi nền thành đêm tuyết…";
     text.setAttribute("aria-label", "Nội dung yêu cầu");
     text.maxLength = 50000;
-    text.oninput = () => updateInline(id, { studioPrompt: text.value });
+    if (kind !== "video") text.oninput = () => updateInline(id, { studioPrompt: text.value });
     const footer = el("div", undefined, "inline-footer"),
       provider = el("select"),
       settings = el("details", undefined, "inline-settings"),
@@ -1056,26 +1200,74 @@ export async function mountStudio(host, id) {
       duration.add(new Option(d + " giây", d));
     duration.value = String(n.data.duration || 5);
     duration.hidden = kind !== "video";
-    const refreshSummary = () =>
-      (summary.textContent =
-        ratio.value +
-        (kind === "video" ? " · " + duration.value + "s" : "") +
-        (kind === "image"
-          ? " · " +
-            { low: "Tiết kiệm", medium: "Tiêu chuẩn", high: "Cao" }[
-              settingsBody.querySelector('[aria-label="Chất lượng ảnh"]')
-                ?.value ||
-                n.data.quality ||
-                "medium"
-            ] +
-            " · " +
-            (settingsBody.querySelector('[aria-label="Số ảnh"]')?.value ||
-              n.data.count ||
-              1) +
-            " ảnh"
-          : "") +
-        " ⌄");
-    refreshSummary();
+    const quality = el("select"), count = el("select"),
+      resolution = el("select"), background = el("select");
+    const qualityLabels = {
+      low: "Thấp", medium: "Tiêu chuẩn", high: "Cao", ultra: "Siêu cao", max: "Tối đa",
+    };
+    quality.setAttribute("aria-label", kind === "video" ? "Chất lượng video" : "Chất lượng ảnh");
+    for (const [value, label] of Object.entries(qualityLabels)) quality.add(new Option(label, value));
+    quality.value = n.data.quality || "medium";
+    resolution.setAttribute("aria-label", "Độ phân giải");
+    for (const value of kind === "video" ? ["480P", "720P", "1080P"] : ["1K", "2K", "4K"])
+      resolution.add(new Option(value, value));
+    resolution.value = n.data.resolution || (kind === "video" ? "720P" : "1K");
+    background.setAttribute("aria-label", "Nền ảnh");
+    for (const [value, label] of [["auto", "Tự động"], ["preserve", "Giữ nền"], ["transparent", "Trong suốt"]])
+      background.add(new Option(label, value));
+    background.value = n.data.background || "auto";
+    count.setAttribute("aria-label", "Số ảnh");
+    for (const value of [1, 2, 4]) count.add(new Option(value + " ảnh", value));
+    count.value = String(n.data.count || 1);
+    const refreshSummary = () => {
+      const label = `${ratio.value} · ${qualityLabels[quality.value]} · ${resolution.value} · ${kind === "video" ? duration.value + "s" : count.value + " ảnh"}`;
+      summary.replaceChildren(icon("frame"), el("span", label), icon("chevronDown"));
+    };
+    const syncGroups = [];
+    const choiceSection = (title, control, field, number = false) => {
+      const section = el("section", undefined, "generation-option-section"),
+        group = el("div", undefined, "generation-option-choices");
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", title);
+      section.append(el("h3", title));
+      const sync = () => {
+        for (const button of group.children) button.setAttribute("aria-pressed", String(button.dataset.value === control.value));
+      };
+      for (const option of control.options) {
+        const tile = button(option.textContent, () => {
+          control.value = option.value;
+          control.dispatchEvent(new Event("change"));
+        });
+        tile.dataset.value = option.value;
+        group.append(tile);
+      }
+      control.classList.add("settings-native-select");
+      control.tabIndex = -1;
+      control.onchange = () => {
+        updateInline(id, { [field]: number ? Number(control.value) : control.value });
+        sync();
+        refreshSummary();
+      };
+      syncGroups.push(sync);
+      section.append(control, group);
+      return section;
+    };
+    settingsBody.classList.add("generation-options-panel");
+    settingsBody.append(
+      choiceSection("Chất lượng", quality, "quality"),
+      choiceSection("Độ phân giải", resolution, "resolution"),
+    );
+    if (kind === "image") settingsBody.append(choiceSection("Nền ảnh", background, "background"));
+    const ratioSection = el("section", undefined, "generation-option-section"),
+      ratioLabel = el("h3", "Tỷ lệ khung");
+    ratio.classList.add("settings-native-select");
+    ratio.tabIndex = -1;
+    ratioSection.append(ratioLabel, ratio, ratioGrid);
+    settingsBody.append(ratioSection);
+    settingsBody.append(kind === "video"
+      ? choiceSection("Thời lượng video", duration, "duration", true)
+      : choiceSection("Số lượng ảnh", count, "count", true));
+    settingsBody.append(el("small", "Đây là yêu cầu đầu ra. Kết quả phụ thuộc model và kết nối AI bạn chọn."));
     ratio.onchange = () => {
       updateInline(id, { size: ratio.value });
       const body = stage.querySelector(`[data-id="${CSS.escape(id)}"] > .cvn-node-body`);
@@ -1084,43 +1276,8 @@ export async function mountStudio(host, id) {
       scheduleWires();
       refreshSummary();
     };
-    duration.onchange = () => {
-      updateInline(id, { duration: Number(duration.value) });
-      refreshSummary();
-    };
-    const quality = el("select"),
-      count = el("select");
-    quality.setAttribute("aria-label", "Chất lượng ảnh");
-    for (const [v, l] of [
-      ["low", "Tiết kiệm"],
-      ["medium", "Tiêu chuẩn"],
-      ["high", "Cao"],
-    ])
-      quality.add(new Option(l, v));
-    quality.value = n.data.quality || "medium";
-    count.setAttribute("aria-label", "Số ảnh");
-    for (const v of [1, 2, 4]) count.add(new Option(v + " ảnh", v));
-    count.value = String(n.data.count || 1);
-    quality.hidden = count.hidden = kind !== "image";
-    quality.onchange = () => {
-      updateInline(id, { quality: quality.value });
-      refreshSummary();
-    };
-    count.onchange = () => {
-      updateInline(id, { count: Number(count.value) });
-      refreshSummary();
-    };
-    settingsBody.append(
-      ratio,
-      duration,
-      quality,
-      count,
-      ratioGrid,
-      el(
-        "small",
-        "Thông số gửi tới API khi được hỗ trợ; trên tab AI, thông số cũng được đưa vào yêu cầu. Model thực tế do bạn chọn trong dịch vụ.",
-      ),
-    );
+    for (const sync of syncGroups) sync();
+    refreshSummary();
     settings.append(summary, settingsBody);
     settings.hidden = kind === "text";
     tabs.setAttribute("aria-label", "Tab chạy luồng");
@@ -1130,13 +1287,20 @@ export async function mountStudio(host, id) {
       tabs,
       button("↻", () => refreshTabs()),
     );
+    function refreshTabSummary(label = "Tab AI") {
+      if (kind === "text") tabSummary.textContent = label;
+      else tabSummary.replaceChildren(icon("reference"));
+      tabSummary.title = label;
+      tabSummary.setAttribute("aria-label", "Chọn tab AI: " + label);
+    }
+    refreshTabSummary();
     const binding = bindings.get(id);
     if (binding?.provider === provider.value) {
       const o = new Option(binding.title, binding.id);
       o.dataset.url = binding.url;
       tabs.add(o);
       tabs.value = String(binding.id);
-      tabSummary.textContent = binding.title;
+      refreshTabSummary(binding.title);
     }
     let tabRevision = 0;
     async function refreshTabs() {
@@ -1185,13 +1349,13 @@ export async function mountStudio(host, id) {
           provider: provider.value,
         });
       else bindings.delete(id);
-      tabSummary.textContent = o?.textContent || "Tab AI";
+      refreshTabSummary(o?.textContent || "Tab AI");
     };
     provider.onchange = () => {
       updateInline(id, { provider: provider.value });
       bindings.delete(id);
       tabs.replaceChildren(new Option("Chọn tab AI…", ""));
-      tabSummary.textContent = "Tab AI";
+      refreshTabSummary();
       connection.hidden = ["openai", "google"].includes(provider.value);
       if (!connection.hidden && connection.open) void refreshTabs();
     };
@@ -1332,12 +1496,26 @@ export async function mountStudio(host, id) {
       }
     });
     tools.firstElementChild.disabled = kind === "text";
-    if (kind === "image") {
+    if (kind !== "text") {
+      footer.classList.add("media-prompt-footer");
+      const model = el("div", undefined, "inline-model-group");
+      model.append(icon("model"), provider);
+      const shortcuts = el("div", undefined, "inline-generation-tools");
+      const style = button("", () => showStyles(id));
+      style.append(icon("materials"));
+      style.setAttribute("aria-label", "Phong cách tạo ảnh/video");
+      style.title = "Phong cách";
       const camera = button("", () => showCamera(id));
-      camera.append(icon("camera"));
-      camera.setAttribute("aria-label", "Máy ảnh");
-      camera.title = "Máy ảnh";
-      footer.append(provider, settings, camera, connection, send);
+      camera.append(el("span", undefined, "lens-glyph"));
+      camera.classList.toggle("camera-configured", Boolean(n.data.cameraPrompt));
+      camera.setAttribute("aria-label", "Ống kính và máy ảnh");
+      camera.title = n.data.cameraPrompt || "Chọn máy ảnh và ống kính";
+      const options = button("", () => { settings.open = !settings.open; });
+      options.append(icon("sliders"));
+      options.setAttribute("aria-label", "Thông số tạo ảnh/video");
+      options.title = "Thông số";
+      shortcuts.append(style, camera, connection, options);
+      footer.append(model, settings, shortcuts, send);
     } else footer.append(provider, settings, connection, send);
     const expand = button("", () => {
       composer.classList.toggle("expanded");
@@ -1345,16 +1523,16 @@ export async function mountStudio(host, id) {
         "aria-expanded",
         String(composer.classList.contains("expanded")),
       );
-      if (kind === "image") fit();
+      if (kind !== "text") fit();
     });
     expand.append(icon("expand"));
     expand.setAttribute("aria-label", "Mở rộng prompt");
     expand.title = "Mở rộng prompt";
     tools.append(expand);
-    if (kind === "image") {
+    if (kind !== "text") {
       for (const b of tools.querySelectorAll("button")) {
         const label = b.textContent;
-        const toolIcon = label.includes("Tải lên") ? "upload" : label === "Tham chiếu" ? "reference" : label === "Đánh dấu" ? "pin" : label === "Phong cách" ? "style" : null;
+        const toolIcon = label.includes("Tải lên") ? "upload" : label === "Tham chiếu" ? "reference" : label === "Đánh dấu" ? "pin" : label === "Phong cách" ? "style" : label === "Nhân vật" ? "smile" : label === "Hiệu ứng" ? "sparkles" : label === "Chuyển động máy" ? "motion" : null;
         if (toolIcon) {
           const caption = el("span", label.replace("＋ ", ""));
           b.replaceChildren(icon(toolIcon), caption);
@@ -1362,16 +1540,21 @@ export async function mountStudio(host, id) {
       }
     }
     composer.append(tools, refs, chooser, text, footer, hint);
-    const incoming = controller.snapshot().edges.filter((e) => e.target === id);
+    const incoming = kind === "video"
+      ? videoReferences().map(reference => ({ source: reference.nodeId, assetReference: reference }))
+      : controller.snapshot().edges.filter((e) => e.target === id);
     for (const [index, edge] of incoming.entries()) {
-      const source = controller
-        .snapshot()
-        .nodes.find((n) => n.id === edge.source);
+      const source = edge.assetReference
+        ? { id: edge.source, data: { assetId: edge.assetReference.assetId, customName: edge.assetReference.name } }
+        : controller.snapshot().nodes.find((n) => n.id === edge.source);
       const chip = button(
         source?.data.customName || "Nguồn",
         () => {
-          chooser.hidden = false;
-          fillChooser();
+          if (kind === "video" && videoReferences().some(reference => reference.assetId === source?.data.assetId)) text.insertReference(source.data.assetId);
+          else {
+            chooser.hidden = false;
+            fillChooser();
+          }
         },
         "inline-ref",
       );
@@ -1396,8 +1579,42 @@ export async function mountStudio(host, id) {
           }
         })();
       }
-      chip.append(el("span", String(index + 1), "inline-ref-number"));
+      const reference = kind === "video" ? videoReferences().find(reference => reference.assetId === source?.data.assetId) : null;
+      chip.append(el("span", String(reference?.number || index + 1), "inline-ref-number"));
+      if (reference) {
+        chip.draggable = true;
+        chip.dataset.referenceAssetId = reference.id;
+        chip.title = "Kéo vào prompt hoặc bấm để chèn " + reference.label;
+        chip.ondragstart = event => {
+          event.dataTransfer.setData("application/x-mooz-reference", reference.id);
+          event.dataTransfer.setData("text/plain", reference.label);
+          event.dataTransfer.effectAllowed = "copyMove";
+        };
+      }
       refs.append(chip);
+    }
+    if (kind === "video") {
+      refs.ondragover = event => {
+        if (![...event.dataTransfer.types].includes("application/x-mooz-reference")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+      };
+      refs.ondrop = event => {
+        const assetId = event.dataTransfer.getData("application/x-mooz-reference");
+        if (!assetId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const order = videoReferences().map(reference => reference.id);
+        if (!order.includes(assetId)) return;
+        const before = event.target.closest("[data-reference-asset-id]")?.dataset.referenceAssetId;
+        if (before === assetId) return;
+        const next = order.filter(id => id !== assetId);
+        const index = before ? next.indexOf(before) : next.length;
+        next.splice(index < 0 ? next.length : index, 0, assetId);
+        updateInline(id, { referenceOrder: JSON.stringify(next) });
+        render();
+      };
     }
     function fillChooser() {
       chooser.replaceChildren();
@@ -1460,7 +1677,7 @@ export async function mountStudio(host, id) {
     });
   }
   function resourcePanel(title) {
-    editor.classList.remove("creative-assistant");
+    editor.classList.remove("creative-assistant", "camera-sheet");
     editor.replaceChildren(
       el("h2", title),
       button("Đóng", () => editor.close()),
@@ -1504,67 +1721,94 @@ export async function mountStudio(host, id) {
         }),
       );
   }
+  function showVideoHints(id, type) {
+    resourcePanel(type === "motion" ? "Chuyển động máy" : "Chỉ dẫn hiệu ứng");
+    editor.append(el("p", "Chọn chỉ dẫn để thêm vào yêu cầu tạo video."));
+    const choices = type === "motion"
+      ? [["Máy cố định", "Máy quay cố định, bố cục ổn định."], ["Lia ngang", "Máy quay lia ngang mượt theo chủ thể."], ["Tiến gần", "Máy quay từ từ tiến gần chủ thể."], ["Lùi xa", "Máy quay từ từ lùi xa để mở rộng không gian."], ["Quỹ đạo", "Máy quay di chuyển theo quỹ đạo quanh chủ thể."]]
+      : [["Chuyển động chậm", "Chuyển động chậm, giữ hành động tự nhiên."], ["Hạt phim", "Kết cấu hạt phim điện ảnh nhẹ."], ["Ánh sáng sương", "Ánh sáng xuyên sương, không khí điện ảnh."]];
+    for (const [label, value] of [...choices, ["Không dùng", ""]]) editor.append(button(label, () => {
+      updateInline(id, { [type === "motion" ? "motionPrompt" : "effectPrompt"]: value });
+      editor.close();
+      notice("Đã lưu chỉ dẫn video");
+    }));
+  }
   function showCamera(id) {
-    resourcePanel("Máy ảnh");
-    const form = el("form"),
-      camera = el("select"),
-      lens = el("select"),
-      focal = el("select"),
-      aperture = el("select");
-    for (const name of [
-      "Máy ảnh điện ảnh",
-      "Máy ảnh trung định dạng",
-      "Máy ảnh ảnh số",
-    ])
-      camera.add(new Option(name, name));
-    for (const name of [
-      "Ống kính tiêu chuẩn",
-      "Ống kính chân dung",
-      "Ống kính góc rộng",
-      "Ống kính macro",
-    ])
-      lens.add(new Option(name, name));
-    for (const v of [18, 24, 35, 50, 85, 135])
-      focal.add(new Option(v + " mm", v));
-    focal.value = "35";
-    for (const v of ["1.4", "2", "2.8", "4", "5.6", "8", "11"])
-      aperture.add(new Option("f/" + v, v));
-    aperture.value = "4";
-    for (const [name, control] of [
-      ["Máy ảnh", camera],
-      ["Ống kính", lens],
-      ["Tiêu cự", focal],
-      ["Khẩu độ", aperture],
-    ]) {
-      const label = el("label", name);
+    resourcePanel("Máy ảnh và ống kính");
+    editor.classList.add("camera-sheet");
+    const heading = el("div", undefined, "camera-sheet-heading");
+    heading.append(...editor.childNodes);
+    editor.append(heading);
+    const node = controller.snapshot().nodes.find(row => row.id === id);
+    if (!node) { editor.close(); return; }
+    const form = el("form", undefined, "camera-picker"),
+      grid = el("div", undefined, "camera-picker-grid"),
+      camera = el("select"), lens = el("select"),
+      focal = el("select"), aperture = el("select"),
+      enabled = el("input");
+    const presets = [
+      ["Máy ảnh", camera, ["Sony Venice", "ARRI Alexa 35", "Panavision DXL2", "Blackmagic URSA"], node.data.cameraBody || "Sony Venice", "camera"],
+      ["Ống kính", lens, ["Zeiss Ultra Prime", "ARRI Signature Prime", "Cooke S4", "Leica Summilux-C"], node.data.cameraLens || "Zeiss Ultra Prime", "lens"],
+      ["Tiêu cự", focal, ["18", "24", "35", "50", "85", "135"], node.data.cameraFocal || "35", "focal"],
+      ["Khẩu độ", aperture, ["1.4", "2", "2.8", "4", "5.6", "8", "11"], node.data.cameraAperture || "4", "aperture"],
+    ];
+    for (const [name, control, choices, selected, mode] of presets) {
+      const column = el("div", undefined, "camera-picker-column"),
+        card = el("label", undefined, "camera-picker-card"),
+        visual = el("span", undefined, "camera-picker-visual " + mode);
+      control.id = "camera-" + mode + "-" + id;
+      card.htmlFor = control.id;
+      card.append(el("span", name, "camera-picker-caption"), visual);
       control.setAttribute("aria-label", name);
-      label.append(control);
-      form.append(label);
+      for (const value of choices)
+        control.add(new Option(mode === "focal" ? value + " mm" : mode === "aperture" ? "f/" + value : value, value));
+      control.value = choices.includes(selected) ? selected : choices[0];
+      const refresh = () => {
+        if (mode === "camera") visual.replaceChildren(icon("camera"));
+        else if (mode === "focal") visual.textContent = control.value;
+        else visual.replaceChildren(el("span", undefined, mode === "lens" ? "camera-lens-art" : "camera-aperture-art"));
+      };
+      const step = (direction) => {
+        control.selectedIndex = (control.selectedIndex + direction + choices.length) % choices.length;
+        refresh();
+      };
+      const previous = button("", () => step(-1)), next = button("", () => step(1));
+      previous.append(icon("chevronUp"));
+      next.append(icon("chevronDown"));
+      previous.setAttribute("aria-label", name + " trước");
+      next.setAttribute("aria-label", name + " sau");
+      control.onchange = refresh;
+      refresh();
+      column.append(previous, card, next, control);
+      grid.append(column);
     }
-    form.append(
-      el(
-        "p",
-        "Các lựa chọn được gửi như chỉ dẫn hình ảnh; đây không phải điều khiển camera vật lý.",
-      ),
-    );
-    const save = el("button", "Áp dụng");
+    enabled.type = "checkbox";
+    enabled.checked = node.data.cameraEnabled !== "off";
+    enabled.setAttribute("role", "switch");
+    enabled.setAttribute("aria-label", "Bật chỉ dẫn máy ảnh và ống kính");
+    const toggle = el("label", undefined, "camera-picker-toggle"),
+      footer = el("div", undefined, "camera-picker-footer"),
+      save = el("button", "Áp dụng"),
+      note = el("p", "Lựa chọn được lưu như chỉ dẫn phong cách chụp cho AI.", "camera-picker-note");
+    toggle.append(el("span", "Bật chỉ dẫn"), enabled);
     save.type = "submit";
-    form.append(save);
+    footer.append(toggle, save);
+    form.append(grid, note, footer);
     form.onsubmit = (e) => {
       e.preventDefault();
       updateInline(id, {
-        cameraPrompt:
-          camera.value +
-          ", " +
-          lens.value +
-          ", tiêu cự " +
-          focal.value +
-          " mm, khẩu độ f/" +
-          aperture.value +
-          ".",
+        cameraBody: camera.value,
+        cameraLens: lens.value,
+        cameraFocal: focal.value,
+        cameraAperture: aperture.value,
+        cameraEnabled: enabled.checked ? "on" : "off",
+        cameraPrompt: enabled.checked
+          ? `${camera.value}, ${lens.value}, tiêu cự ${focal.value} mm, khẩu độ f/${aperture.value}.`
+          : "",
       });
+      render();
       editor.close();
-      notice("Đã lưu chỉ dẫn máy ảnh");
+      notice(enabled.checked ? "Đã lưu máy ảnh và ống kính" : "Đã tắt chỉ dẫn máy ảnh");
     };
     editor.append(form);
   }
@@ -1801,6 +2045,8 @@ export async function mountStudio(host, id) {
 
   viewport.onpointerdown = (e) => {
     if (e.target.closest(".cvn-node") && !panMode) return;
+    pendingLink = null;
+    for (const menu of stage.querySelectorAll(".port-menu")) menu.remove();
     selection.clear();
     renderContext();
     drag = {
@@ -1828,7 +2074,7 @@ export async function mountStudio(host, id) {
   viewport.addEventListener(
     "wheel",
     (e) => {
-      if (e.target.closest("textarea,video")) return;
+      if (e.target.closest('textarea,video,[contenteditable="true"],.generation-options-panel')) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08,
         newZoom = Math.max(0.1, Math.min(4, pan.zoom * factor)),
@@ -1858,10 +2104,51 @@ export async function mountStudio(host, id) {
       notice(e.message);
     }
   };
+  function clearConnectionTargets() {
+    for (const node of stage.querySelectorAll(".connection-drop-target")) node.classList.remove("connection-drop-target");
+  }
+  window.addEventListener("pointermove", (event) => {
+    if (!linkDrag) return;
+    linkDrag.x = event.clientX;
+    linkDrag.y = event.clientY;
+    if (Math.hypot(event.clientX - linkDrag.startX, event.clientY - linkDrag.startY) > 4) linkDrag.moved = true;
+    clearConnectionTargets();
+    const target = document.elementFromPoint(event.clientX, event.clientY),
+      node = target?.closest(".cvn-node"), port = target?.closest(".cvn-port");
+    if (node && node.dataset.id !== linkDrag.id && (!port || port.dataset.side !== linkDrag.side)) node.classList.add("connection-drop-target");
+    scheduleWires();
+  }, { signal: abort.signal });
+  window.addEventListener("pointerup", (event) => {
+    if (!linkDrag) return;
+    const start = linkDrag;
+    linkDrag = null;
+    clearConnectionTargets();
+    if (start.moved) {
+      suppressPortClickUntil = performance.now() + 250;
+      const element = document.elementFromPoint(event.clientX, event.clientY),
+        port = element?.closest(".cvn-port"),
+        targetId = element?.closest(".cvn-node")?.dataset.id;
+      if (targetId && targetId !== start.id && (!port || port.dataset.side !== start.side)) {
+        pendingLink = null;
+        try { connectNodes(start.side === "output" ? start.id : targetId, start.side === "input" ? start.id : targetId); }
+        catch (e) { notice(e.message); }
+      }
+    }
+    scheduleWires();
+  }, { signal: abort.signal });
+  window.addEventListener("pointercancel", () => { linkDrag = null; clearConnectionTargets(); scheduleWires(); }, { signal: abort.signal });
+  window.addEventListener("resize", scheduleWires, { signal: abort.signal });
   window.addEventListener(
     "keydown",
     (e) => {
-      if (e.target.closest("input,textarea,select")) return;
+      if (e.key === "Escape") {
+        pendingLink = null;
+        linkDrag = null;
+        clearConnectionTargets();
+        for (const menu of stage.querySelectorAll(".port-menu")) menu.remove();
+        scheduleWires();
+      }
+      if (e.target.closest('input,textarea,select,[contenteditable="true"]')) return;
       if (
         !e.ctrlKey &&
         !e.metaKey &&

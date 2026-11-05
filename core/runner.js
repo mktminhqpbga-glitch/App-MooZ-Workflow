@@ -1,4 +1,5 @@
 import { validateGraph, topologicalOrder } from "./graph.js";
+import { promptAssetIds } from "./references.js";
 import {
   readAsset,
   addAsset,
@@ -48,6 +49,12 @@ export async function createJob({
       if (!a) throw Error("Thiếu media đầu vào của luồng.");
       inputAssets[a.id] = { kind: a.kind, blob: a.blob, name: a.name };
     }
+  for (const assetId of new Set(snapshot.nodes.flatMap(n => promptAssetIds(n.data.studioPrompt)))) {
+    if (inputAssets[assetId]) continue;
+    const asset = await readAsset(assetId);
+    if (!asset || asset.kind !== "image") throw Error("Thiếu ảnh tham chiếu trong prompt.");
+    inputAssets[assetId] = { kind: asset.kind, blob: asset.blob, name: asset.name };
+  }
   const job = {
     inputAssets,
     id: crypto.randomUUID(),
@@ -103,7 +110,7 @@ async function execute(job, signal, onUpdate) {
       signal.throwIfAborted();
       const n = job.graph.nodes.find((n) => n.id === id),
         incoming = job.graph.edges.filter((e) => e.target === id),
-        sources = incoming.map((e) => ({
+        sources = incoming.filter(e => e.targetPort !== "workflow").map((e) => ({
           edge: e,
           value: job.outputs[e.source],
         }));
@@ -130,6 +137,15 @@ async function execute(job, signal, onUpdate) {
         job.outputs[id] = sources[0]?.value;
         continue;
       }
+      const referencedImages = sources.filter(source => source.value?.kind === "image" && source.value.assetId);
+      const availableImages = new Set([...referencedImages.map(source => source.value.assetId), ...promptAssetIds(n.data.studioPrompt)]);
+      const savedOrder = n.data.referenceOrder ? JSON.parse(n.data.referenceOrder) : [];
+      const imageIds = [...new Set([...savedOrder.filter(id => availableImages.has(id)), ...availableImages])];
+      const inlinePrompt = (n.data.studioPrompt || "").replace(/@\{asset:([a-zA-Z0-9_-]{1,100})\}/g, (_, assetId) => {
+        const index = imageIds.indexOf(assetId);
+        if (index < 0) throw Error("Prompt chứa ảnh tham chiếu đã bị gỡ. Hãy nối lại hoặc xóa thẻ tham chiếu.");
+        return "[Ảnh " + (index + 1) + "]";
+      });
       const mediaType =
           n.type === "generateText"
             ? "text"
@@ -142,21 +158,24 @@ async function execute(job, signal, onUpdate) {
               (s) => s.edge.targetPort === "prompt" && s.value?.kind === "text",
             )
             .map((s) => s.value.text),
-          n.data.studioPrompt || "",
+          inlinePrompt,
           n.data.stylePrompt || "",
           n.data.cameraPrompt || "",
-          n.data.quality === "high"
-            ? "Ưu tiên chi tiết và chất lượng hình ảnh cao."
-            : "",
+          n.data.motionPrompt || "",
+          n.data.effectPrompt || "",
+          n.data.quality ? "Yêu cầu chất lượng: " + ({ low: "thấp", medium: "tiêu chuẩn", high: "cao", ultra: "siêu cao", max: "tối đa" }[n.data.quality]) + "." : "",
+          n.data.resolution ? "Độ phân giải mong muốn: " + n.data.resolution + "." : "",
+          n.data.background === "preserve" ? "Giữ nguyên nền ảnh tham chiếu." : n.data.background === "transparent" ? "Yêu cầu nền trong suốt nếu model hỗ trợ." : "",
         ]
           .filter(Boolean)
           .join("\n");
       if (!prompt.trim()) throw Error("Bước AI chưa có prompt.");
       const refs = [];
-      for (const s of sources.filter((s) => s.value?.assetId)) {
+      if (sources.some(source => source.value?.assetId && source.value.kind !== "image"))
+        throw Error("Kết nối hiện tại chưa hỗ trợ video gốc làm tham chiếu; hãy dùng ảnh chụp khung hình.");
+      for (const assetId of imageIds) {
         const asset =
-          job.inputAssets?.[s.value.assetId] ||
-          (await readAsset(s.value.assetId));
+          job.inputAssets?.[assetId] || (await readAsset(assetId));
         if (!asset) throw Error("Tài sản tham chiếu đã bị xóa.");
         if (asset.kind !== "image")
           throw Error(
@@ -178,7 +197,7 @@ async function execute(job, signal, onUpdate) {
         prompt,
         referenceImages: refs,
         size: n.data.size || "16:9",
-        quality: n.data.quality || "medium",
+        quality: ["ultra", "max"].includes(n.data.quality) ? "high" : n.data.quality || "medium",
         duration: n.data.duration ?? 5,
       });
       if (result.status !== "success") {

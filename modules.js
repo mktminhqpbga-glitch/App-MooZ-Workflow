@@ -3,6 +3,7 @@ import {
   readyOperations,
 } from "./core/capabilities.js";
 import { editImage, captureFrame } from "./media-tools.js";
+import { nodeAssetIds } from "./core/references.js";
 import { el, button, notice, api, providerList } from "./client-api.js";
 import {
   list,
@@ -185,10 +186,7 @@ export async function mountLibrary(host) {
           if (item.blob) {
             const used = (await repo.list()).filter((p) =>
               p.graph.nodes.some(
-                (n) =>
-                  n.data.assetId === item.id ||
-                  (n.data.resultAssets &&
-                    JSON.parse(n.data.resultAssets).includes(item.id)),
+                (n) => nodeAssetIds(n).includes(item.id),
               ),
             );
             const people = (await list("characters")).filter(
