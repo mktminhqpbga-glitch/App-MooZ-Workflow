@@ -69,7 +69,10 @@ const staticFiles = new Set([
   "core/storage.js",
   "core/runner.js",
   "core/backup.js",
+  "core/capabilities.js",
   "media-tools.js",
+  "image-workbench.js",
+  "icons.js",
   "vendor/mooz/canvas-image-editor.js",
   "vendor/mooz/canvas-image-editor.css",
   "client-api.js",
@@ -124,6 +127,7 @@ const server = createServer(async (req, res) => {
             name: p.name,
             types: p.types,
             ready: !!process.env[p.key],
+            operations: p.types.map((type) => type + ".generate"),
           })),
         });
       if (path === "/api/tabs" && req.method === "GET")

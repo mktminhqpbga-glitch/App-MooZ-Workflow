@@ -1,3 +1,7 @@
+import {
+  advancedImageOperations,
+  readyOperations,
+} from "./core/capabilities.js";
 import { editImage, captureFrame } from "./media-tools.js";
 import { el, button, notice, api, providerList } from "./client-api.js";
 import {
@@ -180,8 +184,24 @@ export async function mountLibrary(host) {
         button("Xóa", async () => {
           if (item.blob) {
             const used = (await repo.list()).filter((p) =>
-              p.graph.nodes.some((n) => n.data.assetId === item.id),
+              p.graph.nodes.some(
+                (n) =>
+                  n.data.assetId === item.id ||
+                  (n.data.resultAssets &&
+                    JSON.parse(n.data.resultAssets).includes(item.id)),
+              ),
             );
+            const people = (await list("characters")).filter(
+              (p) => p.assetId === item.id,
+            );
+            if (people.length) {
+              notice(
+                "Ảnh đang dùng cho nhân vật: " +
+                  people.map((p) => p.name).join(", ") +
+                  ". Xóa liên kết trong thư viện nhân vật trước.",
+              );
+              return;
+            }
             if (used.length) {
               notice(
                 "Đang dùng trong: " +
@@ -374,6 +394,19 @@ export async function mountSettings(host) {
             p.name +
               " · " +
               (p.ready ? "Có khóa trên máy chủ" : "Chưa cấu hình khóa"),
+          ),
+        );
+      const available = readyOperations(s);
+      cards.append(el("h2", "Khả năng công cụ ảnh"));
+      for (const [operation, label] of Object.entries(advancedImageOperations))
+        cards.append(
+          el(
+            "p",
+            label +
+              " · " +
+              (available.has(operation)
+                ? "Kết nối đã khai báo hỗ trợ"
+                : "Chưa có kết nối hỗ trợ — ẩn trên canvas"),
           ),
         );
       const sidebar = document.querySelector(".connection small");

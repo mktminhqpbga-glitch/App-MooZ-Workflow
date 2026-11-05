@@ -1,3 +1,6 @@
+import { availableImageTools } from "./core/capabilities.js";
+import { icon } from "./icons.js";
+import { openImageTool } from "./image-workbench.js";
 import { exportBundle } from "./core/backup.js";
 import { ProjectRepository, createProject } from "./core/projects.js";
 import { GraphController, nodeTypes } from "./core/graph.js";
@@ -7,6 +10,7 @@ import {
   listAssets,
   write,
   list,
+  remove,
 } from "./core/storage.js";
 import { createJob, startJob, stopJob } from "./core/runner.js";
 import { api, providerList, el, button, notice } from "./client-api.js";
@@ -50,8 +54,18 @@ export async function mountStudio(host, id) {
     wheelSave = null,
     inlineSave = null;
   const bindings = new Map(),
-    activeJobs = new Map();
-  let panMode = false;
+    activeJobs = new Map(),
+    batches = new Map();
+  let panMode = false,
+    connectionCapabilities = null;
+  void api("status")
+    .then((value) => {
+      if (!disposed) {
+        connectionCapabilities = value;
+        renderContext();
+      }
+    })
+    .catch(() => {});
   document.body.classList.add("studio-mode");
   host.classList.add("studio-host");
   host.replaceChildren();
@@ -151,18 +165,29 @@ export async function mountStudio(host, id) {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 7z"/></svg>';
   select.setAttribute("aria-pressed", "true");
   select.setAttribute("aria-label", "Chọn đối tượng");
+  function dockButton(label, name, fn) {
+    const b = button("", fn);
+    b.setAttribute("aria-label", label);
+    b.title = label;
+    b.append(icon(name));
+    return b;
+  }
   dock.append(
     addMenu,
     select,
-    button("▧", showAssets),
-    button("◷", showHistory),
+    dockButton("Phong cách", "materials", showStyles),
+    dockButton("Nhân vật", "smile", showCharacters),
+    dockButton("Công cụ", "tools", showImageTools),
+    dockButton("Lịch sử", "clock", showHistory),
+    el("span", undefined, "dock-divider"),
+    dockButton("Phím tắt", "keyboard", () => showHelp(true)),
+    dockButton("Trợ giúp", "help", () => showHelp(false)),
   );
-  dock.children[2].setAttribute("aria-label", "Kho");
-  dock.children[3].setAttribute("aria-label", "Hàng đợi");
-  dock.children[2].innerHTML =
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h7l2 3h9v13H3z"/></svg>';
-  dock.children[3].innerHTML =
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>';
+  const orb = button("", () => showHelp(false), "cvn-orb");
+  orb.setAttribute("aria-label", "Trợ lý sáng tạo");
+  orb.title = "Trợ lý sáng tạo";
+  orb.append(el("span"));
+  shell.append(orb);
   shell.append(dock);
   const hud = el("div", undefined, "panel cvn-hud"),
     zoom = el("span", "100%");
@@ -173,7 +198,7 @@ export async function mountStudio(host, id) {
     button("Vừa khung", fit),
   );
   shell.append(hud);
-  const context = el("div", undefined, "panel cvn-context");
+  const context = el("div", undefined, "panel cvn-image-toolbar");
   context.hidden = true;
   shell.append(context);
   const files = el("input");
@@ -330,6 +355,7 @@ export async function mountStudio(host, id) {
     render();
     fit();
     openEditor(n.id);
+    return n;
   }
   async function addAssetNode(a) {
     const n = {
@@ -365,6 +391,30 @@ export async function mountStudio(host, id) {
         media.preload = "metadata";
       } else media.alt = a.name;
       container.replaceChildren(media);
+      media.addEventListener(
+        "load",
+        () => {
+          scheduleWires();
+          renderContext();
+        },
+        { once: true },
+      );
+      if (media.tagName === "IMG") {
+        const node = container.closest(".cvn-node");
+        if (node) {
+          const label =
+            node.querySelector(".cvn-dimensions") ||
+            el("span", undefined, "cvn-dimensions");
+          label.textContent = "";
+          node.append(label);
+          media.onload = () => {
+            label.textContent =
+              media.naturalWidth + " × " + media.naturalHeight;
+            scheduleWires();
+            renderContext();
+          };
+        }
+      }
     } catch (e) {
       notice(e.message);
     }
@@ -398,6 +448,8 @@ export async function mountStudio(host, id) {
       card.dataset.id = n.id;
       Object.assign(card.style, { left: n.x + "px", top: n.y + "px" });
       card.append(title, body);
+      if (["generateImage", "generateVideo"].includes(n.type))
+        setPreviewRatio(body, n.data.size || "16:9");
       if (n.data.assetId) {
         stage.append(card);
         void assetView(n.data.assetId, body);
@@ -433,6 +485,26 @@ export async function mountStudio(host, id) {
       if (n.type.startsWith("generate")) {
         card.classList.add("generation-node");
         card.append(makeComposer(n));
+        if (n.data.resultAssets) {
+          try {
+            const ids = JSON.parse(n.data.resultAssets);
+            if (ids.length > 1) {
+              const gallery = el("nav", undefined, "node-results");
+              gallery.setAttribute("aria-label", "Kết quả tạo ảnh");
+              for (const [i, assetId] of ids.entries()) {
+                const b = button(String(i + 1), () =>
+                  command({ type: "updateNode", id: n.id, patch: { assetId } }),
+                );
+                b.setAttribute(
+                  "aria-pressed",
+                  String(assetId === n.data.assetId),
+                );
+                gallery.append(b);
+              }
+              card.append(gallery);
+            }
+          } catch {}
+        }
       }
       if (!card.isConnected) stage.append(card);
       const more = el("details", undefined, "node-more"),
@@ -514,18 +586,16 @@ export async function mountStudio(host, id) {
       }
       card.onpointerdown = (e) => {
         if (panMode) return;
+        if (!selection.has(n.id) || selection.size !== 1) {
+          selection = new Set([n.id]);
+          renderContext();
+        }
         if (
           e.target.closest(
             "button,textarea,video,audio,input,select,summary,.inline-composer",
           )
         )
           return;
-        if (e.shiftKey) {
-          selection.has(n.id) ? selection.delete(n.id) : selection.add(n.id);
-        } else if (!selection.has(n.id)) selection = new Set([n.id]);
-        for (const c of stage.querySelectorAll(".cvn-node"))
-          c.classList.toggle("selected", selection.has(c.dataset.id));
-        renderContext();
         drag = {
           mode: "node",
           id: n.id,
@@ -623,9 +693,61 @@ export async function mountStudio(host, id) {
       wires.append(path);
     }
   }
+  function setPreviewRatio(body, value) {
+    const [width, height] = value.split(":").map(Number);
+    if (width > 0 && height > 0) {
+      body.style.setProperty("--preview-ratio", `${width} / ${height}`);
+      requestAnimationFrame(() => {
+        if (!body.isConnected) return;
+        for (const port of body.parentElement.querySelectorAll(":scope > .cvn-port"))
+          port.style.top = body.offsetTop + body.offsetHeight / 2 - port.offsetHeight / 2 + "px";
+        scheduleWires();
+      });
+    }
+  }
   function renderContext() {
-    context.hidden = true;
+    for (const card of stage.querySelectorAll(".cvn-node")) {
+      const selected = selection.size === 1 && selection.has(card.dataset.id);
+      card.classList.toggle("selected", selected);
+      const composer = card.querySelector(".inline-composer");
+      if (composer) {
+        composer.hidden = !selected;
+        if (!selected) for (const menu of composer.querySelectorAll("details[open]")) menu.open = false;
+      }
+    }
+    scheduleWires();
     context.replaceChildren();
+    context.hidden = true;
+    if (selection.size !== 1) return;
+    const n = controller.snapshot().nodes.find((n) => selection.has(n.id));
+    if (!n?.data.assetId) return;
+    const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`);
+    if (!card?.querySelector("img")) return;
+    context.hidden = false;
+    context.setAttribute("aria-label", "Công cụ ảnh đã chọn");
+    for (const { label, icon: name, mode } of availableImageTools(
+      connectionCapabilities,
+    )) {
+      const b = button("", () => imageTool(n, mode));
+      b.append(icon(name));
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      if (["edit", "grid"].includes(mode)) b.append(el("span", label));
+      context.append(b);
+    }
+    const download = button("", async () => {
+      const a = await readAsset(n.data.assetId);
+      const link = el("a");
+      link.href = URL.createObjectURL(a.blob);
+      link.download = a.name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    });
+    download.setAttribute("aria-label", "Tải ảnh xuống");
+    download.title = "Tải xuống";
+    download.append(icon("download"));
+    context.append(download);
+    context.style.top = "88px";
   }
   function updateInline(id, patch) {
     if (failed)
@@ -697,6 +819,48 @@ export async function mountStudio(host, id) {
       }),
       upload,
     );
+    if (kind === "image") {
+      const graph = controller.snapshot(),
+        reference = n.data.assetId
+          ? n
+          : graph.edges
+              .filter((e) => e.target === id)
+              .map((e) => graph.nodes.find((row) => row.id === e.source))
+              .find((row) => row?.data.assetId);
+      if (reference)
+        tools.append(
+          button("Đánh dấu", async () => {
+            const asset = await readAsset(reference.data.assetId);
+            if (!asset || asset.kind !== "image")
+              throw Error("Chưa có ảnh tham chiếu để đánh dấu.");
+            await openImageTool(asset, "draw", {
+              onResult: async (output) => {
+                const source = {
+                  id: crypto.randomUUID(),
+                  type: "imageInput",
+                  x: n.x - 660,
+                  y: n.y + 300,
+                  data: { customName: output.name, assetId: output.id },
+                };
+                controller.execute({ type: "addNode", node: source });
+                controller.execute({
+                  type: "connect",
+                  edge: {
+                    id: crypto.randomUUID(),
+                    source: source.id,
+                    sourcePort: "image",
+                    target: id,
+                    targetPort: "reference",
+                  },
+                });
+                render();
+                await persist();
+              },
+            });
+          }),
+        );
+      tools.append(button("Phong cách", () => showStyles(id)));
+    }
     const text = el("textarea");
     text.value = n.data.studioPrompt || "";
     text.placeholder =
@@ -718,13 +882,35 @@ export async function mountStudio(host, id) {
       tabs = el("select"),
       hint = el("p", undefined, "inline-status");
     provider.setAttribute("aria-label", "AI thực hiện");
+    provider.add(new Option("Chọn AI…", ""));
     for (const p of providerList.filter((p) => p.types.includes(kind)))
       provider.add(new Option(p.name, p.id));
-    provider.value = n.data.provider || "muse";
+    provider.value = n.data.provider ?? "";
     ratio.setAttribute("aria-label", "Tỷ lệ");
-    for (const r of ["16:9", "9:16", "1:1", "4:3", "3:4"])
+    for (const r of ["1:1", "1:2", "2:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21"])
       ratio.add(new Option(r, r));
     ratio.value = n.data.size || "16:9";
+    const ratioGrid = el("div", undefined, "ratio-grid");
+    ratioGrid.setAttribute("role", "group");
+    ratioGrid.setAttribute("aria-label", "Chọn tỷ lệ khung");
+    const syncRatioButtons = () => {
+      for (const b of ratioGrid.children) b.setAttribute("aria-pressed", String(b.dataset.ratio === ratio.value));
+    };
+    for (const option of ratio.options) {
+      const tile = button("", () => {
+        ratio.value = option.value;
+        ratio.dispatchEvent(new Event("change"));
+      });
+      tile.dataset.ratio = option.value;
+      tile.setAttribute("aria-label", "Khung " + option.value);
+      const shape = el("span", undefined, "ratio-shape");
+      const [w, h] = option.value.split(":").map(Number);
+      shape.style.width = (w >= h ? 24 : 24 * w / h) + "px";
+      shape.style.height = (h >= w ? 24 : 24 * h / w) + "px";
+      tile.append(shape, el("span", option.value));
+      ratioGrid.append(tile);
+    }
+    syncRatioButtons();
     duration.setAttribute("aria-label", "Thời lượng");
     for (const d of [5, 10, 15, 30, 40])
       duration.add(new Option(d + " giây", d));
@@ -734,17 +920,67 @@ export async function mountStudio(host, id) {
       (summary.textContent =
         ratio.value +
         (kind === "video" ? " · " + duration.value + "s" : "") +
+        (kind === "image"
+          ? " · " +
+            { low: "Tiết kiệm", medium: "Tiêu chuẩn", high: "Cao" }[
+              settingsBody.querySelector('[aria-label="Chất lượng ảnh"]')
+                ?.value ||
+                n.data.quality ||
+                "medium"
+            ] +
+            " · " +
+            (settingsBody.querySelector('[aria-label="Số ảnh"]')?.value ||
+              n.data.count ||
+              1) +
+            " ảnh"
+          : "") +
         " ⌄");
     refreshSummary();
     ratio.onchange = () => {
       updateInline(id, { size: ratio.value });
+      const body = stage.querySelector(`[data-id="${CSS.escape(id)}"] > .cvn-node-body`);
+      if (body) setPreviewRatio(body, ratio.value);
+      syncRatioButtons();
+      scheduleWires();
       refreshSummary();
     };
     duration.onchange = () => {
       updateInline(id, { duration: Number(duration.value) });
       refreshSummary();
     };
-    settingsBody.append(ratio, duration);
+    const quality = el("select"),
+      count = el("select");
+    quality.setAttribute("aria-label", "Chất lượng ảnh");
+    for (const [v, l] of [
+      ["low", "Tiết kiệm"],
+      ["medium", "Tiêu chuẩn"],
+      ["high", "Cao"],
+    ])
+      quality.add(new Option(l, v));
+    quality.value = n.data.quality || "medium";
+    count.setAttribute("aria-label", "Số ảnh");
+    for (const v of [1, 2, 4]) count.add(new Option(v + " ảnh", v));
+    count.value = String(n.data.count || 1);
+    quality.hidden = count.hidden = kind !== "image";
+    quality.onchange = () => {
+      updateInline(id, { quality: quality.value });
+      refreshSummary();
+    };
+    count.onchange = () => {
+      updateInline(id, { count: Number(count.value) });
+      refreshSummary();
+    };
+    settingsBody.append(
+      ratio,
+      duration,
+      quality,
+      count,
+      ratioGrid,
+      el(
+        "small",
+        "Thông số gửi tới API khi được hỗ trợ; trên tab AI, thông số cũng được đưa vào yêu cầu. Model thực tế do bạn chọn trong dịch vụ.",
+      ),
+    );
     settings.append(summary, settingsBody);
     settings.hidden = kind === "text";
     tabs.setAttribute("aria-label", "Tab chạy luồng");
@@ -823,7 +1059,11 @@ export async function mountStudio(host, id) {
     const send = button(
       "↑",
       async () => {
-        if (activeJobs.has(id)) return stopJob(activeJobs.get(id));
+        if (batches.has(id)) {
+          batches.get(id).cancelled = true;
+          if (activeJobs.has(id)) await stopJob(activeJobs.get(id));
+          return;
+        }
         updateInline(id, {
           studioPrompt: text.value,
           provider: provider.value,
@@ -852,63 +1092,87 @@ export async function mountStudio(host, id) {
           groups: [],
         };
         const b = bindings.get(id);
-        const job = await createJob({
-          projectId: project.id,
-          graph: subset,
-          provider: provider.value,
-          tabId: b?.provider === provider.value ? b.id : null,
-          chatURL: b?.provider === provider.value ? b.url : null,
-          title: n.data.customName || project.name,
-          kind,
-        });
-        activeJobs.set(id, job.id);
-        send.disabled = false;
-        send.textContent = "■";
-        send.setAttribute("aria-label", "Dừng tạo");
+        const batch = { cancelled: false };
+        batches.set(id, batch);
         try {
-          const result = await startJob(job.id, (j) => {
-            const message =
-              {
-                queued: "Chờ lượt",
-                preparing: "Chuẩn bị",
-                sent: "Đang chờ AI…",
-                receiving: "Nhận kết quả",
-                success: "Đã tạo xong",
-                unknown: "Cần kiểm tra kết quả",
-                error: "Có lỗi",
-              }[j.status] || j.status;
-            hint.textContent = message;
-            status.textContent = message;
-          });
-          if (result.status !== "success") {
-            hint.textContent = result.error || "Tác vụ chưa hoàn tất.";
-            notice(hint.textContent);
-            return;
-          }
-          for (const [nodeId, output] of Object.entries(result.outputs))
-            if (
-              subset.nodes
-                .find((n) => n.id === nodeId)
-                ?.type.startsWith("generate")
-            ) {
-              controller.execute({
-                type: "updateNode",
-                id: nodeId,
-                patch: output.assetId
-                  ? { assetId: output.assetId }
-                  : { text: output.text },
+          const outputs = [];
+          const total =
+            kind === "image"
+              ? controller.snapshot().nodes.find((row) => row.id === id).data
+                  .count || 1
+              : 1;
+          for (let attempt = 0; attempt < total; attempt++) {
+            if (batch.cancelled) break;
+            const job = await createJob({
+              projectId: project.id,
+              graph: subset,
+              provider: provider.value,
+              tabId: b?.provider === provider.value ? b.id : null,
+              chatURL: b?.provider === provider.value ? b.url : null,
+              title: n.data.customName || project.name,
+              kind,
+            });
+            activeJobs.set(id, job.id);
+            send.disabled = false;
+            send.textContent = "■";
+            send.setAttribute("aria-label", "Dừng tạo");
+            try {
+              const result = await startJob(job.id, (j) => {
+                const message =
+                  {
+                    queued: "Chờ lượt",
+                    preparing: "Chuẩn bị",
+                    sent: "Đang chờ AI…",
+                    receiving: "Nhận kết quả",
+                    success: "Đã tạo xong",
+                    unknown: "Cần kiểm tra kết quả",
+                    error: "Có lỗi",
+                  }[j.status] || j.status;
+                hint.textContent = message;
+                status.textContent = message;
               });
+              if (result.status !== "success") {
+                hint.textContent = result.error || "Tác vụ chưa hoàn tất.";
+                notice(hint.textContent);
+                if (outputs.length) render();
+                return;
+              }
+              for (const [nodeId, output] of Object.entries(result.outputs))
+                if (
+                  subset.nodes
+                    .find((n) => n.id === nodeId)
+                    ?.type.startsWith("generate")
+                ) {
+                  controller.execute({
+                    type: "updateNode",
+                    id: nodeId,
+                    patch: output.assetId
+                      ? { assetId: output.assetId }
+                      : { text: output.text },
+                  });
+                }
+              if (result.outputs[id]?.assetId)
+                outputs.push(result.outputs[id].assetId);
+              if (outputs.length)
+                controller.execute({
+                  type: "updateNode",
+                  id,
+                  patch: { resultAssets: JSON.stringify(outputs) },
+                });
+              await persist();
+            } finally {
+              activeJobs.delete(id);
+              send.textContent = "↑";
+              send.setAttribute(
+                "aria-label",
+                kind === "video" ? "Tạo video" : "Tạo ảnh",
+              );
             }
-          activeJobs.delete(id);
-          await persist();
+          }
           render();
         } finally {
+          batches.delete(id);
           activeJobs.delete(id);
-          send.textContent = "↑";
-          send.setAttribute(
-            "aria-label",
-            kind === "video" ? "Tạo video" : "Tạo ảnh",
-          );
         }
       },
       "inline-send",
@@ -928,7 +1192,24 @@ export async function mountStudio(host, id) {
       }
     });
     tools.firstElementChild.disabled = kind === "text";
-    footer.append(provider, settings, connection, send);
+    if (kind === "image") {
+      const camera = button("", () => showCamera(id));
+      camera.append(icon("camera"));
+      camera.setAttribute("aria-label", "Máy ảnh");
+      camera.title = "Máy ảnh";
+      footer.append(provider, settings, camera, connection, send);
+    } else footer.append(provider, settings, connection, send);
+    const expand = button("", () => {
+      composer.classList.toggle("expanded");
+      expand.setAttribute(
+        "aria-expanded",
+        String(composer.classList.contains("expanded")),
+      );
+    });
+    expand.append(icon("expand"));
+    expand.setAttribute("aria-label", "Mở rộng prompt");
+    expand.title = "Mở rộng prompt";
+    tools.append(expand);
     composer.append(tools, refs, chooser, text, footer, hint);
     const incoming = controller.snapshot().edges.filter((e) => e.target === id);
     for (const edge of incoming) {
@@ -1009,11 +1290,265 @@ export async function mountStudio(host, id) {
     }
     return composer;
   }
+  function selectedImage() {
+    const n = controller
+      .snapshot()
+      .nodes.find((n) => selection.has(n.id) && n.data.assetId);
+    return n;
+  }
+  async function imageTool(n, mode) {
+    const asset = await readAsset(n.data.assetId);
+    if (!asset) throw Error("Ảnh đã bị xóa khỏi Kho.");
+    return openImageTool(asset, mode, {
+      onResult: async (output) => {
+        if (!disposed) await addAssetNode(output);
+      },
+    });
+  }
+  function resourcePanel(title) {
+    editor.replaceChildren(
+      el("h2", title),
+      button("Đóng", () => editor.close()),
+    );
+    if (!editor.open) editor.show();
+  }
+  function showStyles(targetId) {
+    resourcePanel("Phong cách");
+    for (const [label, prompt] of [
+      [
+        "Điện ảnh",
+        "Phong cách điện ảnh, ánh sáng có chủ đích, bố cục giàu chiều sâu, màu sắc nhất quán.",
+      ],
+      [
+        "Chân dung",
+        "Chân dung tự nhiên, giữ nhận diện, chi tiết da chân thực và hậu cảnh mềm.",
+      ],
+      [
+        "Sản phẩm",
+        "Ảnh sản phẩm studio, ánh sáng rõ, giữ hình dáng, màu sắc và nhãn thật.",
+      ],
+      [
+        "Hoạt hình",
+        "Phong cách hoạt hình với đường nét rõ ràng, ánh sáng và màu sắc hài hòa.",
+      ],
+    ])
+      editor.append(
+        button(label, () => {
+          const n = controller
+            .snapshot()
+            .nodes.find(
+              (n) =>
+                n.id === (targetId || [...selection][0]) &&
+                n.type.startsWith("generate"),
+            );
+          if (!n) throw Error("Chọn bước tạo ảnh/video trước.");
+          updateInline(n.id, { stylePrompt: prompt });
+          render();
+          editor.close();
+          notice("Đã áp dụng phong cách " + label);
+        }),
+      );
+  }
+  function showCamera(id) {
+    resourcePanel("Máy ảnh");
+    const form = el("form"),
+      camera = el("select"),
+      lens = el("select"),
+      focal = el("select"),
+      aperture = el("select");
+    for (const name of [
+      "Máy ảnh điện ảnh",
+      "Máy ảnh trung định dạng",
+      "Máy ảnh ảnh số",
+    ])
+      camera.add(new Option(name, name));
+    for (const name of [
+      "Ống kính tiêu chuẩn",
+      "Ống kính chân dung",
+      "Ống kính góc rộng",
+      "Ống kính macro",
+    ])
+      lens.add(new Option(name, name));
+    for (const v of [18, 24, 35, 50, 85, 135])
+      focal.add(new Option(v + " mm", v));
+    focal.value = "35";
+    for (const v of ["1.4", "2", "2.8", "4", "5.6", "8", "11"])
+      aperture.add(new Option("f/" + v, v));
+    aperture.value = "4";
+    for (const [name, control] of [
+      ["Máy ảnh", camera],
+      ["Ống kính", lens],
+      ["Tiêu cự", focal],
+      ["Khẩu độ", aperture],
+    ]) {
+      const label = el("label", name);
+      control.setAttribute("aria-label", name);
+      label.append(control);
+      form.append(label);
+    }
+    form.append(
+      el(
+        "p",
+        "Các lựa chọn được gửi như chỉ dẫn hình ảnh; đây không phải điều khiển camera vật lý.",
+      ),
+    );
+    const save = el("button", "Áp dụng");
+    save.type = "submit";
+    form.append(save);
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      updateInline(id, {
+        cameraPrompt:
+          camera.value +
+          ", " +
+          lens.value +
+          ", tiêu cự " +
+          focal.value +
+          " mm, khẩu độ f/" +
+          aperture.value +
+          ".",
+      });
+      editor.close();
+      notice("Đã lưu chỉ dẫn máy ảnh");
+    };
+    editor.append(form);
+  }
+  async function showCharacters() {
+    resourcePanel("Nhân vật của tôi");
+    const upload = el("input");
+    upload.type = "file";
+    upload.accept = "image/*";
+    upload.hidden = true;
+    upload.onchange = async () => {
+      try {
+        const file = upload.files[0];
+        if (!file) return;
+        const asset = await addAsset(file, { projectId: project.id });
+        const name = prompt("Tên nhân vật", file.name);
+        if (name === null) return;
+        await write("characters", {
+          id: crypto.randomUUID(),
+          name: name?.trim() || file.name,
+          assetId: asset.id,
+          createdAt: new Date().toISOString(),
+        });
+        await showCharacters();
+      } catch (e) {
+        notice(e.message);
+      }
+    };
+    editor.append(
+      button("＋ Thêm nhân vật", () => upload.click()),
+      upload,
+    );
+    for (const person of await list("characters")) {
+      editor.append(
+        button(person.name, async () => {
+          const asset = await readAsset(person.assetId);
+          if (!asset) throw Error("Ảnh nhân vật đã bị xóa. Hãy thêm lại.");
+          const target = controller
+            .snapshot()
+            .nodes.find(
+              (n) =>
+                selection.has(n.id) &&
+                ["generateImage", "generateVideo"].includes(n.type),
+            );
+          if (target) {
+            const source = {
+              id: crypto.randomUUID(),
+              type: "imageInput",
+              x: target.x - 660,
+              y: target.y,
+              data: { customName: person.name, assetId: asset.id },
+            };
+            controller.execute({ type: "addNode", node: source });
+            controller.execute({
+              type: "connect",
+              edge: {
+                id: crypto.randomUUID(),
+                source: source.id,
+                sourcePort: "image",
+                target: target.id,
+                targetPort: "reference",
+              },
+            });
+            render();
+            await persist();
+          } else await addAssetNode(asset);
+          editor.close();
+        }),
+      );
+      editor.append(
+        button("Xóa " + person.name, async () => {
+          if (
+            confirm(
+              "Xóa nhân vật khỏi thư viện? Ảnh gốc vẫn nằm trong Đầu vào.",
+            )
+          ) {
+            await remove("characters", person.id);
+            await showCharacters();
+          }
+        }),
+      );
+    }
+  }
+  function showImageTools() {
+    resourcePanel("Công cụ ảnh");
+    editor.append(button("Kho tài nguyên", showAssets));
+    for (const { label, mode } of availableImageTools(connectionCapabilities))
+      editor.append(
+        button(label, async () => {
+          const n = selectedImage();
+          if (!n) throw Error("Chọn một ảnh trên canvas trước.");
+          editor.close();
+          await imageTool(n, mode);
+        }),
+      );
+  }
+  function showHelp(shortcuts = false) {
+    resourcePanel(shortcuts ? "Phím tắt" : "Trợ lý sáng tạo");
+    if (shortcuts) {
+      for (const text of [
+        "V: chọn đối tượng",
+        "H: kéo canvas",
+        "Ctrl/Cmd + Z: hoàn tác",
+        "Ctrl/Cmd + Shift + Z: làm lại",
+        "Ctrl/Cmd + Enter: gửi prompt đang nhập",
+        "Nhấp node để chọn; nhấp nền để bỏ chọn. Mỗi lần chỉ chọn một node",
+        "Cuộn chuột: phóng to / thu nhỏ",
+      ])
+        editor.append(el("p", text));
+      return;
+    }
+    editor.append(
+      el(
+        "p",
+        "Bạn muốn bắt đầu từ ảnh hay video? Tạo bước, nhập ý tưởng ngay bên dưới rồi chọn AI để chạy.",
+      ),
+    );
+    const idea = el("textarea");
+    idea.placeholder = "Ý tưởng của bạn…";
+    idea.setAttribute("aria-label", "Ý tưởng sáng tạo");
+    editor.append(idea);
+    for (const [type, label] of [
+      ["generateImage", "Tạo ảnh từ ý tưởng"],
+      ["generateVideo", "Tạo video từ ý tưởng"],
+    ])
+      editor.append(
+        button(label, async () => {
+          const n = await addNode(type);
+          updateInline(n.id, { studioPrompt: idea.value });
+          render();
+          editor.close();
+        }),
+      );
+  }
   function templateGraph() {
     const graph = controller.snapshot();
     for (const n of graph.nodes)
       if (n.type.startsWith("generate") || n.type === "preview") {
         delete n.data.assetId;
+        delete n.data.resultAssets;
         if (n.type === "generateText") delete n.data.text;
       }
     return graph;
@@ -1165,6 +1700,15 @@ export async function mountStudio(host, id) {
     "keydown",
     (e) => {
       if (e.target.closest("input,textarea,select")) return;
+      if (
+        !e.ctrlKey &&
+        !e.metaKey &&
+        ["v", "h"].includes(e.key.toLowerCase())
+      ) {
+        panMode = e.key.toLowerCase() === "h";
+        select.setAttribute("aria-pressed", String(!panMode));
+        viewport.style.cursor = panMode ? "grab" : "";
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         e.shiftKey ? controller.redo() : controller.undo();
@@ -1182,6 +1726,8 @@ export async function mountStudio(host, id) {
     if (drawFrame) cancelAnimationFrame(drawFrame);
     abort.abort();
     editor.remove();
+    for (const dialog of document.querySelectorAll(".image-workbench"))
+      dialog.close();
     document.body.classList.remove("studio-mode");
     host.classList.remove("studio-host");
     for (const url of urls.values()) URL.revokeObjectURL(url);

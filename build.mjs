@@ -13,7 +13,10 @@ for (const file of [
   "core/storage.js",
   "core/runner.js",
   "core/backup.js",
+  "core/capabilities.js",
   "media-tools.js",
+  "image-workbench.js",
+  "icons.js",
   "vendor/mooz/canvas-image-editor.js",
   "vendor/mooz/canvas-image-editor.css",
 ]) {

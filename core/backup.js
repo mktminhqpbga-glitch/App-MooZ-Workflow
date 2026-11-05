@@ -6,7 +6,12 @@ export async function exportBundle(project) {
     assets = [];
   let bytes = 0;
   for (const id of new Set(
-    clean.graph.nodes.map((n) => n.data.assetId).filter(Boolean),
+    clean.graph.nodes
+      .flatMap((n) => [
+        n.data.assetId,
+        ...(n.data.resultAssets ? JSON.parse(n.data.resultAssets) : []),
+      ])
+      .filter(Boolean),
   )) {
     const a = await readAsset(id);
     if (!a)
@@ -69,6 +74,13 @@ export async function importBundle(text) {
         if (!map.has(n.data.assetId))
           throw Error("Bản sao lưu thiếu media được tham chiếu.");
         n.data.assetId = map.get(n.data.assetId);
+      }
+    for (const n of graph.nodes)
+      if (n.data.resultAssets) {
+        const ids = JSON.parse(n.data.resultAssets);
+        if (ids.some((id) => !map.has(id)))
+          throw Error("Bản sao lưu thiếu kết quả tạo ảnh.");
+        n.data.resultAssets = JSON.stringify(ids.map((id) => map.get(id)));
       }
     project.graph = graph;
     return { project, created };

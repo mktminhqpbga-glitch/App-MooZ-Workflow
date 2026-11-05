@@ -143,6 +143,11 @@ async function execute(job, signal, onUpdate) {
             )
             .map((s) => s.value.text),
           n.data.studioPrompt || "",
+          n.data.stylePrompt || "",
+          n.data.cameraPrompt || "",
+          n.data.quality === "high"
+            ? "Ưu tiên chi tiết và chất lượng hình ảnh cao."
+            : "",
         ]
           .filter(Boolean)
           .join("\n");
@@ -173,6 +178,7 @@ async function execute(job, signal, onUpdate) {
         prompt,
         referenceImages: refs,
         size: n.data.size || "16:9",
+        quality: n.data.quality || "medium",
         duration: n.data.duration ?? 5,
       });
       if (result.status !== "success") {

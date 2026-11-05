@@ -64,6 +64,9 @@ export async function generateAPI(
           model: env.MOOZ_OPENAI_IMAGE_MODEL || "gpt-image-1",
           prompt,
           n: 1,
+          quality: ["low", "medium", "high"].includes(input.quality)
+            ? input.quality
+            : "medium",
           size:
             input.size === "9:16"
               ? "1024x1536"

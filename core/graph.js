@@ -23,6 +23,11 @@ const allowed = [
   "duration",
   "assetId",
   "expectedKind",
+  "stylePrompt",
+  "cameraPrompt",
+  "quality",
+  "count",
+  "resultAssets",
 ];
 export const emptyGraph = () => ({
   nodes: [],
@@ -65,7 +70,21 @@ export function validateGraph(value) {
     for (const key of allowed) {
       if (!Object.hasOwn(n.data, key)) continue;
       const v = n.data[key];
-      if (key === "duration") {
+      if (key === "resultAssets") {
+        let ids;
+        try {
+          ids = JSON.parse(v);
+        } catch {
+          throw Error("Danh sách kết quả không hợp lệ.");
+        }
+        if (!Array.isArray(ids) || ids.length > 20 || ids.some((i) => !id(i)))
+          throw Error("Danh sách kết quả không hợp lệ.");
+      } else if (key === "count") {
+        if (![1, 2, 4].includes(v)) throw Error("Số ảnh cần là 1, 2 hoặc 4.");
+      } else if (key === "quality") {
+        if (!["low", "medium", "high"].includes(v))
+          throw Error("Chất lượng không hợp lệ.");
+      } else if (key === "duration") {
         if (v !== null && (!Number.isInteger(v) || v < 1 || v > 120))
           throw Error("Thời lượng không hợp lệ.");
       } else if (typeof v !== "string" || v.length > 50000)

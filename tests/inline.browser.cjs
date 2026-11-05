@@ -137,8 +137,42 @@ const { chromium } = require("playwright"),
     assert.equal(sent[1].tabId, 8);
     assert.equal(sent[1].prompt, "Video từ prompt bên dưới");
     await page.getByRole("button", { name: "Vừa khung", exact: true }).click();
+    assert.equal(await page.locator(".inline-composer:visible").count(), 1);
+    await imageNode.locator(".cvn-node-title").click({ modifiers: ["Shift"] });
+    assert.equal(await page.locator(".cvn-node.selected").count(), 1);
+    assert.equal(await page.locator(".inline-composer:visible").count(), 1);
+    assert.equal(await imageNode.locator(".inline-composer").isVisible(), true);
+    assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), true);
+    await imageNode.locator(".inline-settings summary").click();
+    for (const ratio of ["9:16", "1:1", "21:9"]) {
+      await imageNode.getByLabel("Tỷ lệ", { exact: true }).selectOption(ratio);
+      const measured = await imageNode.locator(".cvn-node-body").evaluate(e => e.offsetWidth / e.offsetHeight);
+      const [w, h] = ratio.split(":").map(Number);
+      assert.ok(Math.abs(measured - w / h) < .03, `${ratio} frame changes immediately`);
+    }
+    await imageNode.locator(".inline-settings summary").click();
+    await videoNode.locator(".cvn-node-title").click({ modifiers: ["Shift"] });
+    assert.equal(await page.locator(".cvn-node.selected").count(), 1);
+    assert.equal(await imageNode.locator(".inline-composer").isVisible(), false);
+    assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), false);
+    await page.locator(".cvn-viewport").click({ position: { x: 15, y: 150 } });
+    assert.equal(await page.locator(".cvn-node.selected").count(), 0);
+    assert.equal(await page.locator(".inline-composer:visible").count(), 0);
+    assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), false);
+    // Wait for the debounced project write before verifying restoration.
+    await page.waitForFunction(async () => {
+      const { ProjectRepository } = await import("./core/projects.js");
+      const id = location.hash.split("/").pop();
+      return (await new ProjectRepository().get(id)).graph.nodes.find(n => n.type === "generateImage").data.size === "21:9";
+    });
     await page.reload();
     await page.locator(".generation-node video").waitFor();
+    assert.equal(await page.locator(".inline-composer:visible").count(), 0);
+    assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), false);
+    const restored = await imageNode.locator(".cvn-node-body").evaluate(e => e.offsetWidth / e.offsetHeight);
+    assert.ok(Math.abs(restored - 21 / 9) < .03);
+    assert.equal(await imageNode.locator("img").evaluate(e => e.naturalWidth), 640);
+
     assert.equal(
       await page.locator(".generation-node .inline-composer").count(),
       2,

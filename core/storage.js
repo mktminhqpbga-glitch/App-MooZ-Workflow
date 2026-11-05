@@ -2,9 +2,16 @@ const DB = "mooz-cvn-content";
 let pending;
 export function contentDB() {
   return (pending ||= new Promise((resolve, reject) => {
-    const r = indexedDB.open(DB, 2);
+    const r = indexedDB.open(DB, 3);
     r.onupgradeneeded = () => {
-      for (const name of ["inputs", "results", "prompts", "jobs", "templates"])
+      for (const name of [
+        "inputs",
+        "results",
+        "prompts",
+        "jobs",
+        "templates",
+        "characters",
+      ])
         if (!r.result.objectStoreNames.contains(name))
           r.result.createObjectStore(name, { keyPath: "id" });
       if (r.result.objectStoreNames.contains("assets")) {
