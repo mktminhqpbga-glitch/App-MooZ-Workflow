@@ -36,19 +36,28 @@ Danh sách này theo các yêu cầu trong cuộc trao đổi; cập nhật cùn
 
 | Yêu cầu | Kết quả hiện tại | Kiểm tra |
 | --- | --- | --- |
-| Ba phần gọn: hai khu làm việc và một tiến trình | Đã tách hai form độc lập và cột hàng đợi, co trên màn hình nhỏ | Trình duyệt |
+| Yêu cầu mới nhất thay hai khu bằng một luồng rộng + tiến trình | Một form, lựa chọn nằm dưới prompt, ảnh nhân vật tùy chọn, cột queue sát phải; sidebar đẩy nội dung | Trình duyệt: đo khi mở/thu sidebar |
 | Chọn ảnh bằng hình thay cho danh sách tên file | Đã có lưới thumbnail, xem ảnh đang chọn và bỏ chọn | Trình duyệt |
 | Kiểm tra các nút ảnh/luồng mẫu/AI/tab/cập nhật/tỷ lệ/xếp hàng | Đã nối dữ liệu; chụp lựa chọn riêng khi xếp job, giữ tab hợp lệ khi cập nhật, không gửi nếu thiếu tab | Trình duyệt: cả API và Chrome mô phỏng |
 | Tỷ lệ mở bảng nhiều lựa chọn như Canvas | Đã có 13 tỷ lệ, 5 mức chất lượng, độ phân giải, nền và số ảnh; video có thời lượng | Trình duyệt và bộ chạy |
 | Thanh trạng thái và thanh nhóm giống mẫu | Đã có, hiển thị số tab nhận được và số job đang xử lý | Mã và trình duyệt |
 | Luồng mẫu phải dùng thông số vừa chọn, không giữ tỷ lệ cũ | Đã sửa, xóa đầu ra cũ của mẫu | Trình duyệt |
-| Hiển thị tiến trình thật | Đếm bước AI có đầu ra / tổng bước, kèm trạng thái job, khu, AI và tab | Trình duyệt với kết quả mô phỏng; không bịa phần trăm AI đang tạo |
+| Hiển thị tiến trình thật | Đếm bước AI/local có đầu ra được chấp nhận / tổng bước, kèm trạng thái job, khu, AI và tab | Trình duyệt với kết quả mô phỏng; không bịa phần trăm AI đang tạo |
 
 ## Chưa hoàn chỉnh / chưa kiểm chứng trực tiếp
 
-- “Đầu → Cuối”, “Nối dài” có vị trí trong thanh nhóm nhưng chưa nối bộ xử lý video riêng; hiện vô hiệu hóa, không giả lập kết quả.
-- Các mục Đạo diễn, dựng phim thông minh, audio trong ảnh tham khảo ban đầu chưa có bộ chạy tương ứng. Danh mục thêm node hiện chỉ chạy văn bản/kịch bản/ảnh/video.
+- “Đầu → Cuối” còn vô hiệu hóa: chưa có adapter đã xác thực hỗ trợ hai frame đầu/cuối. “Nối dài” đã có chuỗi frame cuối thật → video mới → ghép và kiểm tra thời lượng thật.
+- Đã có node hậu kỳ video/âm thanh local, TTS/Whisper phía máy chủ và ghép nhiều cảnh. Các công cụ AI chuyên biệt chưa có adapter sẽ không được trình bày như chức năng đã hoàn thành.
 - Các công cụ AI chuyên sâu trong ảnh tham khảo (ví dụ toàn cảnh/hiệu ứng chuyên biệt) chỉ hiển thị hoặc hoạt động khi có handler thực sự; không coi một mẫu prompt là bộ xử lý chuyên dụng.
 - Chưa có danh mục nhân vật chính thức từ nhà cung cấp. Kho hiện dùng ảnh người dùng đã có/tải lên.
 - Chưa kiểm tra tạo kết quả trên tài khoản AI thật trong lượt này; các kiểm tra dùng phản hồi thử nghiệm.
 - Chưa xác nhận deployment Production của Vercel đã nhận commit mới. Workspace build được; môi trường này bị chặn truy cập trực tiếp Vercel, nên không xác nhận website live chỉ dựa vào git push.
+
+## Bổ sung theo tài liệu và bản desktop 0.2.0
+
+- Chuẩn bị toàn đợt trước khi tạo dữ liệu; parser khối/dòng/đoạn/toàn văn, @tag, negative prompt, bản sao độc lập, snapshot ảnh bất biến và giới hạn dung lượng.
+- Chạy queue riêng, Web Lock một chủ, 1–6 slot, mỗi tab một job, pin tab, pause không hủy lượt đã gửi, reload cần đối chiếu.
+- Kịch bản JSON 1–12 cảnh, prompt ảnh/video riêng, checkpoint, sửa JSON không tạo lại bước đã nhận, MP4 FFmpeg thật.
+- Các công cụ hậu kỳ giữ nguồn, sắp thứ tự clip, hủy xử lý; output đã đổi thông số được đánh dấu cũ.
+- App Electron x64 có backend loopback, renderer sandbox, extension ZIP kèm Cài đặt. Native macOS CI tạo ZIP/DMG và chỉ publish sau khi chạy kiểm tra gói thật. Chưa có Developer ID/notarization.
+- Tạo gói Mac trên Linux không đồng nghĩa đã chạy app trên Mac; ghi nhận kết quả riêng trong báo cáo kiểm thử.

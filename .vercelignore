@@ -6,3 +6,7 @@ dist/
 server.mjs
 server/
 tests/
+
+artifacts/
+desktop/
+.github/

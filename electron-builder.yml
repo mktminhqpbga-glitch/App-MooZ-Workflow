@@ -1,0 +1,32 @@
+appId: vn.mooz.cvn
+productName: MooZ CVN
+asar: false
+directories:
+  output: artifacts
+files:
+  - '*.js'
+  - '*.mjs'
+  - '*.html'
+  - '*.css'
+  - core/**
+  - server/**
+  - desktop/**
+  - vendor/**
+  - downloads/**
+  - LICENSE
+  - README.md
+  - package.json
+  - '!**/*.test.*'
+mac:
+  target:
+    - target: zip
+      arch: x64
+    - target: dmg
+      arch: x64
+  icon: desktop/icon.icns
+  category: public.app-category.graphics-design
+  hardenedRuntime: true
+  identity: null
+  artifactName: 'MooZ-CVN-macOS-Intel.${ext}'
+linux:
+  target: dir

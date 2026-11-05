@@ -1,3 +1,13 @@
+export function validateAPIInput(input, env = process.env) {
+  const provider = apiProviders[input.provider];
+  if (!provider || !env[provider.key]) throw Error('Chưa cấu hình khóa API trên máy chủ.');
+  if (!provider.types.includes(input.mediaType)) throw Error('API này chưa hỗ trợ đầu ra đã chọn. Dùng tab AI cho video.');
+  const refs = input.referenceImages || [];
+  if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 50000 || !Array.isArray(refs) || refs.length > 8 || refs.some(ref => typeof ref !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(ref))) throw Error('Prompt hoặc ảnh tham chiếu không hợp lệ.');
+  const sizes = refs.map(ref => Buffer.byteLength(ref.slice(ref.indexOf(',')+1),'base64'));
+  if (sizes.some(size => size > 8*1024*1024) || sizes.reduce((sum,size)=>sum+size,0)>32*1024*1024) throw Error('Ảnh tham chiếu vượt 8 MB/ảnh hoặc tổng 32 MB.');
+  if (input.provider === 'openai' && input.mediaType === 'image' && refs.length && !/^gpt-image-/.test(env.MOOZ_OPENAI_IMAGE_MODEL || 'gpt-image-1')) throw Error('Model OpenAI đã cấu hình chưa có adapter chỉnh ảnh tham chiếu.');
+}
 export const apiProviders = {
   openai: {
     name: "OpenAI API",
@@ -14,50 +24,36 @@ export async function generateAPI(
   input,
   { env = process.env, fetchImpl = fetch, signal } = {},
 ) {
-  const p = apiProviders[input.provider],
-    key = p && env[p.key];
-  if (!key) throw Error("Chưa cấu hình khóa API trên máy chủ.");
-  if (!p.types.includes(input.mediaType))
-    throw Error("API này chưa hỗ trợ đầu ra đã chọn. Dùng tab AI cho video.");
-  const prompt = input.prompt,
-    refs = input.referenceImages || [];
-  if (
-    typeof prompt !== "string" ||
-    !prompt.trim() ||
-    prompt.length > 50000 ||
-    refs.length > 8 ||
-    refs.some(
-      (r) =>
-        typeof r !== "string" ||
-        !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(r),
-    ) ||
-    refs.join("").length > 24 * 1024 * 1024
-  )
-    throw Error("Prompt hoặc ảnh tham chiếu không hợp lệ.");
+  validateAPIInput(input, env);
+  const p = apiProviders[input.provider], key = env[p.key], prompt = input.prompt, refs = input.referenceImages || [];
   const request = async (url, body, headers) => {
     const res = await fetchImpl(url, {
       method: "POST",
       redirect: "error",
       signal: signal || AbortSignal.timeout(240000),
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
+      headers: { ...(body instanceof FormData ? {} : { "Content-Type": "application/json" }), ...headers },
+      body: body instanceof FormData ? body : JSON.stringify(body),
     });
-    if (!res.ok)
-      throw Error(
-        "API trả HTTP " +
-          res.status +
-          ". Kiểm tra lượt đã gửi trước khi chạy lại.",
-      );
+    if (!res.ok) {
+      const error = Error('API trả HTTP ' + res.status + '. Kiểm tra lượt đã gửi trước khi chạy lại.');
+      if (res.status === 429) { const header=res.headers?.get('retry-after'), seconds=Number(header);error.code='RATE_LIMITED';error.retryAfterMs=Math.min(86400000,Math.max(1000,Number.isFinite(seconds)&&header!==null?seconds*1000:Date.parse(header)-Date.now()||60000)); }
+      throw error;
+    }
     const text = await res.text();
     if (text.length > 50 * 1024 * 1024) throw Error("Kết quả API quá lớn.");
     return JSON.parse(text);
   };
   if (input.provider === "openai") {
     if (input.mediaType === "image") {
-      if (refs.length)
-        throw Error(
-          "OpenAI tạo ảnh trong bản web hiện chỉ nhận prompt; dùng Gemini hoặc tab AI để dùng ảnh tham chiếu.",
-        );
+      const size = input.size === '9:16' ? '1024x1536' : input.size === '16:9' ? '1536x1024' : '1024x1024';
+      if (refs.length) {
+        const form = new FormData();
+        form.append('model',env.MOOZ_OPENAI_IMAGE_MODEL || 'gpt-image-1'); form.append('prompt',prompt); form.append('size',size); form.append('n','1'); form.append('quality',['low','medium','high'].includes(input.quality)?input.quality:'medium');
+        for (const [index,ref] of refs.entries()) { const mime=ref.slice(5,ref.indexOf(';')),bytes=Buffer.from(ref.slice(ref.indexOf(',')+1),'base64');form.append('image[]',new Blob([bytes],{type:mime}),'reference-'+index+'.'+(mime==='image/jpeg'?'jpg':mime.split('/')[1])); }
+        const r = await request('https://api.openai.com/v1/images/edits',form,{Authorization:'Bearer '+key});
+        if (!r.data?.[0]?.b64_json) throw Error('API chưa trả dữ liệu ảnh.');
+        return {kind:'image',url:'data:image/png;base64,'+r.data[0].b64_json};
+      }
       const r = await request(
         "https://api.openai.com/v1/images/generations",
         {

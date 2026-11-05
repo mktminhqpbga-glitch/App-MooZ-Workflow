@@ -39,6 +39,7 @@ export async function captureFrame(asset, time = 0) {
       };
       video.src = url;
     });
+    const capturedTime=Math.min(Math.max(0,time),Math.max(0,video.duration-.05));
     if (time > 0) {
       await new Promise((resolve, reject) => {
         const timer = setTimeout(
@@ -70,7 +71,7 @@ export async function captureFrame(asset, time = 0) {
     );
     if (!blob) throw Error("Không xuất được khung hình.");
     return await addAsset(
-      new File([blob], asset.name + " · " + time.toFixed(1) + "s.png", {
+      new File([blob], asset.name + " · " + capturedTime.toFixed(1) + "s.png", {
         type: "image/png",
       }),
       { projectId: asset.projectId, source: "video-frame" },

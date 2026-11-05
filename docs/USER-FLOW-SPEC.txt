@@ -1,0 +1,191 @@
+  N[Negative prompt chung] --> G11
+  N --> G12
+  N --> G21
+  G11 --> A11[Asset ảnh 1.1]
+  G12 --> A12[Asset ảnh 1.2]
+  G21 --> A21[Asset ảnh 2.1]
+```
+
+Ví dụ: 3 prompt, 2 bản sao → 6 node tạo ảnh/6 lượt kết quả. “Bản sao” là **sáu lần tạo độc lập**, không phải nhân bản cùng một tệp ảnh. Mỗi result gắn đúng node/request và có thể đưa tiếp sang node video/hậu kỳ theo edge.
+
+### 3.2 Đường B — Hàng đợi · Kho ảnh / Flow Studio
+
+1. Thêm ảnh PNG/JPG/WebP vào kho, tối đa **8 MB mỗi ảnh**; tag được tạo từ tên và có thể sửa. Trong prompt dùng `@tag` để tham chiếu ảnh. Một job tối đa **8 ảnh**, tổng dữ liệu ảnh snapshot trong kho/hàng đợi giới hạn **32 MB**. Tag chưa tồn tại chặn cả đợt trước khi xếp.
+2. Tách prompt bằng khối `[ ... ]` (mặc định, cho phép nhiều dòng), hoặc mỗi dòng, mỗi đoạn cách dòng trống, hoặc gộp toàn văn thành một job. Mỗi đợt tối đa **50 prompt**, mỗi prompt tối đa **20.000 ký tự**, danh sách tối đa **200 job**. Chọn AI, chat/tab, tỷ lệ và thời lượng khi loại job cần video; kiểm tra khả năng provider.
+3. **Thêm & tạo node** tạo nhóm node và chốt prompt/ảnh/thiết lập/chat thành snapshot, chưa tự gửi AI. **Chạy hàng đợi** bắt đầu cấp việc. Có thể đặt 1–6 tác vụ song song toàn queue (mặc định 1), nhưng **mỗi tab một việc** và giới hạn provider/nhịp gửi vẫn áp dụng. Muốn song song thực, phải có nhiều tab thích hợp và cấu hình provider cho phép.
+4. Mỗi dòng có Task ID, trạng thái, prompt snapshot, đầu vào, lỗi và kết quả đúng lượt; xem/tải ảnh từ asset của chính Task ID. Đổi tag hoặc xóa ảnh gốc khỏi kho sau khi xếp không đổi ảnh đã chốt. Nếu tải lại app/trang lúc job đang chạy, job thành **Cần kiểm tra**, không tự gửi lại. Hàng đợi lưu cục bộ trong hồ sơ, không đồng bộ nhiều máy; chỉ một trang quản lý queue có Web Lock.
+
+```mermaid
+flowchart TD
+  Library[Ảnh trong Kho + tag] --> Resolve[Giải @tag và kiểm tra giới hạn]
+  Text[Prompt + chế độ tách] --> Resolve
+  Resolve --> Snap[Chốt snapshot từng job]
+  Snap --> Queue[Hàng đợi theo Task ID]
+  Queue --> Gate[Chờ tab/API và AI Dispatch]
+  Gate --> Result[Đọc đúng lượt, kiểm tra ảnh, lưu asset]
+  Result --> Node[Node/preview của job]
+  Result --> History[Lịch sử và tải tệp]
+```
+
+**Lưu ý khi xây app mới:** giữ hai thao tác riêng `tạo kế hoạch/node` và `thực sự gửi AI`; hiển thị số job, số đang chạy, lý do chờ, số hoàn thành/lỗi/cần kiểm tra. Không dùng một con số phần trăm giả khi provider chỉ trả trạng thái chung. Kết quả của job cũ không bị thay bằng media mới khi người dùng tạo lại từ cùng một thẻ.
+
+## 4. Tạo video hàng loạt: từ đầu vào đến MP4
+
+### 4.1 Chuẩn bị đầu vào và luồng
+
+Có thể nhập **văn bản** (mỗi dòng một video hoặc gộp nhiều dòng thành một yêu cầu) hoặc tạo **sản phẩm từ ảnh** (mỗi ảnh là một sản phẩm hoặc nhiều ảnh chung một sản phẩm). Mỗi sản phẩm có tên/yêu cầu riêng; bản nháp có thể sửa trước khi xếp. Ở form chạy, chọn luồng đã lưu hoặc tạo graph, số cảnh 1–12, tỷ lệ, thời lượng yêu cầu mỗi cảnh và **một AI cho cả luồng**. Graph video hàng loạt hiện chọn các provider **tab** mà tất cả bước AI cùng hỗ trợ; với bước video, thực tế là Muse/Grok/Google Flow theo khả năng adapter. Google/fal **API video** là adapter ở các đường tác vụ khác, không phải lựa chọn thay thế trực tiếp trong bộ chọn AI của graph này. Chọn một tab chạy cả job hoặc tự chọn một tab phù hợp. Nếu chọn tab A mà A bận, job chờ A. Hai tab bận thì job tiếp theo chờ; không tách một job sang hai tab.
+
+Graph `mooz-flow-plan-v1` có đầu vào A/B/C (ảnh, văn bản, video, âm thanh; bắt buộc hoặc tùy chọn), bước xử lý AI/local, kết quả Z. Dây nối có **kiểu dữ liệu**, runner chỉ lấy nguồn thực sự nối vào cổng. Graph có giới hạn khoảng **40 node, 120 dây, 12 cảnh**. Tên/bố cục node không tạo ra dữ liệu; edge và port mới xác định đường truyền. Luồng hai cảnh trở lên cần bước viết kịch bản; luồng một cảnh có thể đi trực tiếp tới tạo video rồi ghép. Bước tạo ảnh trước video là tùy chọn: nếu có, video dùng ảnh cảnh đã tạo; nếu không, dùng ảnh gốc/tham chiếu hợp lệ.
+
+```mermaid
+flowchart LR
+  A[Ảnh sản phẩm] --> Vision[Đọc ảnh nếu cần]
+  B[Prompt / yêu cầu] --> Script[Viết kịch bản có cấu trúc]
+  Vision --> Script
+  C[Nhân vật tham chiếu tùy chọn] --> Image[Tạo ảnh từng cảnh - tùy chọn]
+  A --> Image
+  Script --> Image
+  Script --> Video[Tạo video từng cảnh]
+  Image --> Video
+  A -. Không có bước tạo ảnh .-> Video
+  Video --> Assemble[Ghép clip theo thứ tự - local]
+  Assemble --> Z[MP4 kết quả / assetId]
+  Z --> Post[Hậu kỳ - tùy chọn]
+```
+
+**Kịch bản nhiều cảnh** cần JSON có đúng số cảnh liên tiếp, `title`, `voiceover`, `imagePrompt`, `videoPrompt`, thời lượng/tỷ lệ khi cần. Bước ảnh chỉ dùng `imagePrompt` của cảnh tương ứng; bước video dùng `videoPrompt` và lời thoại đúng cảnh. Không đưa toàn bộ kịch bản lẫn prompt video vào lượt tạo ảnh. `voiceover` là nội dung chỉ dẫn, **không bảo đảm** file có giọng đọc hoặc lip-sync; muốn tiếng nói chắc chắn phải tạo/thêm track ở hậu kỳ.
+
+### 4.2 Trình tự chạy và kết quả
+
+```mermaid
+sequenceDiagram
+  actor U as Người dùng
+  participant B as Batch runner
+  participant Q as Queue và tab cố định
+  participant AI as AI provider
+  participant F as FFmpeg cục bộ
+  participant M as Kho media
+  U->>B: Chọn luồng, đầu vào, AI, tab, xếp hàng
+  B->>B: Chốt graph/ảnh/prompt/cấu hình cho từng job
+  B->>Q: Chờ đúng tab và hạn mức provider
+  loop Từng bước AI, từng cảnh theo graph
+    Q->>AI: Gửi một request có ID
+    AI-->>Q: Text / ảnh / video đúng lượt
+    Q->>M: Kiểm tra và lưu asset cảnh
+    M-->>B: assetId và checkpoint
+  end
+  B->>F: Ghép các clip đã lưu theo thứ tự
+  F->>M: Ghi MP4 cuối
+  M-->>U: resultId, xem/tải/hậu kỳ
+```
+
+Khi xếp hàng, app **chốt** ảnh, tên, prompt, graph/version, provider, tab preference, tỷ lệ/thời lượng. Thay bản nháp sau đó không thay job cũ. Runner đợi tài nguyên; chạy từng node theo thứ tự topo; với mỗi cảnh chỉ chuyển ảnh/nhân vật/video nguồn mà port đó nhận (tối đa **8 ảnh tham chiếu trong một lượt AI** ở flow runner, video nguồn tùy adapter). Kết quả text được giữ dưới dạng raw/parsed; ảnh/video phải được tải và lưu thành asset trước khi đi tiếp. `job.outputs[stepId].items` giữ asset theo từng cảnh. Bước ghép trên máy chỉ chạy khi có đủ clip thật, không dùng poster. Bước Z có `resultId`; lịch sử mở lại được asset, xem/tải MP4 và chuyển sang hậu kỳ.
+
+Thời lượng 5/10/15/30/40 giây trong UI là **yêu cầu**; thời lượng thực do dịch vụ trả về, và adapter API có giới hạn riêng. Nếu chọn “Không chọn”, runner không nhét số giây giả vào prompt. Google Veo adapter có thể chỉ cho một ảnh mở đầu và một số mức duration riêng; fal Motion Control yêu cầu đúng một ảnh + một video nguồn. Nếu nhà cung cấp không hỗ trợ input đó, phải chặn trước khi gửi. Video có thể giữ frame cuối để làm tham chiếu cảnh sau, nhưng trích frame thất bại không được dùng frame giả.
+
+**Ví dụ thao tác:** chuẩn bị 3 ảnh sản phẩm và yêu cầu chung “quay cận sản phẩm, nền studio”; chọn luồng 2 cảnh có `đọc ảnh → viết kịch bản → tạo video cảnh 1,2 → ghép`; chọn Muse và tab Muse A, tỷ lệ 9:16, yêu cầu 10 giây/cảnh; xếp 3 sản phẩm thành 3 job. Job 1 giữ A qua cả hai cảnh và ghép. Job 2/3 chờ A hoặc dùng tab khác **chỉ khi ban đầu chọn tự động và được gán tab phù hợp**; không chuyển giữa chừng. Mỗi job có 2 clip cảnh đã lưu và một MP4 cuối riêng. Nếu kịch bản sai JSON, dừng trước lượt tạo video; giữ câu trả lời thô để sửa/kiểm tra và chạy tiếp mà không gửi lại bước đã chấp nhận.
+
+**Dừng/lỗi/khôi phục:** tạm dừng chỉ ngừng cấp việc mới; request đã gửi phải chờ hoặc thành `cần đối chiếu`. Nếu tab đổi chat, mất login, provider xác minh/429 hoặc relay rớt, hiện nguyên nhân và giữ tab của job. Không tự failover sang tab khác. Sau restart, job `running` không tự gửi lại; những asset/checkpoint đã lưu vẫn có. Người dùng kiểm tra tab/lịch sử AI trước khi retry phần còn thiếu. Dọn hàng đợi hoàn thành không đồng nghĩa xóa tệp lịch sử.
+
+## 5. Hậu kỳ video: công cụ, cách nối và cách dùng
+
+Hậu kỳ nhận **video đầu vào**, MP4 tạo bởi AI hoặc video từ bước hậu kỳ trước. Phần lớn thao tác dùng **FFmpeg WASM cục bộ**, mã hóa lại tệp mới và giữ nguồn cũ. Chỉ chọn TTS/Whisper mới gửi văn bản hoặc audio/video tới OpenAI; các công cụ cắt/màu/ghép/nhạc/phụ đề SRT có sẵn xử lý trên máy. Không giả định hậu kỳ biến video chất lượng thấp thành chi tiết thật; xuất H.264/AAC, hiệu ứng thường giới hạn cạnh dài 1280 và 24 fps.
+
+| Công cụ/node | Đầu vào cần chọn | Thiết lập quan trọng | Kết quả |
+| --- | --- | --- | --- |
+| Cắt video | Một video | Bắt đầu/kết thúc tính giây; kết thúc 0 = đến hết, đoạn tối thiểu 0,05 giây | MP4 đoạn đã cắt. |
+| Xoay/lật | Một video | Góc 0/90/180/270; lật ngang tùy chọn | MP4 đổi chiều hình; âm thanh giữ. |
+| Chỉnh màu | Một video | Sáng −0,5…0,5; tương phản 0,1…3; bão hòa 0…3 | MP4 đã chỉnh màu; 0 saturation thành trắng đen. |
+| Vừa khung | Một video | Tỷ lệ/khung đích | MP4 giữ tỷ lệ bằng padding nếu cần, không kéo giãn chủ thể. |
+| Tách âm thanh | Video có track âm thanh | Không cần model AI | MP3 cho tải hoặc nối sang node âm thanh. |
+| Âm thanh/nhạc nền | Video + MP3/WAV/M4A | Âm lượng gốc/nhạc 0–2; tắt âm gốc, lặp nhạc tùy chọn | MP4 có track trộn; nhạc ngắn có thể thêm im lặng khi không lặp. |
+| Phụ đề | Video + SRT nhập/tệp hoặc text SRT | Timeline SRT hợp lệ, không chồng/vượt thời lượng; cỡ chữ 10–80 | MP4 burn-in phụ đề, có thể tải SRT riêng. |
+| Nhận diện phụ đề | Video/audio chưa có SRT | OpenAI Whisper API, key có quyền, tệp ≤25 MB | SRT để sửa và đưa vào node phụ đề; có thể tính phí. |
+| Lồng tiếng | Văn bản hoặc lời đọc | OpenAI `gpt-4o-mini-tts`, giọng/tốc độ, tối đa 4096 ký tự | MP3 giọng đọc AI; không phải clone giọng cá nhân. |
+| Đồng bộ lời đọc–cảnh | Nhiều video cảnh + một/nhiều MP3 đọc | Một MP3 chung chia theo trọng số lời thoại hoặc đều; một MP3/cảnh khớp từng cảnh; cắt/giữ frame cuối/đổi tốc độ | MP4 với lời đọc thay track gốc. Không phải căn từng từ tự động. |
+| Chuyển cảnh | Hai clip theo thứ tự | Hòa hình/tan/quét/trượt, chồng 0,1–5 giây và ngắn hơn mỗi clip | MP4 chuyển cảnh; tổng thời lượng trừ đoạn chồng. |
+| Điều chỉnh tốc độ | Một video | Hệ số 0,25–4 | MP4 đổi tốc độ hình và âm, cố giữ cao độ. |
+| Watermark/logo | Video + ảnh logo | Vị trí/kích thước/độ mờ theo node hiện hành | MP4 có lớp logo. |
+| Ghép/xuất cuối | Các clip theo thứ tự/timeline | Thứ tự cảnh, đoạn dùng, âm thanh cuối | MP4 thành phẩm mới; asset nguồn/trung gian vẫn giữ. |
+
+```mermaid
+flowchart LR
+  Source[Video AI hoặc video tải lên] --> Trim[Cắt]
+  Trim --> Color[Chỉnh màu / vừa khung]
+  Color --> Voice[Đồng bộ lời đọc - nếu cần]
+  Text[Lời thoại] --> TTS[TTS OpenAI - tùy chọn] --> Voice
+  Voice --> Subs[Phụ đề SRT - nếu cần]
+  SRT[SRT nhập hoặc Whisper] --> Subs
+  Subs --> Music[Trộn nhạc - nếu cần]
+  Audio[Nhạc tải lên] --> Music
+  Music --> Logo[Watermark - nếu cần]
+  Logo --> Final[Ghép/timeline, lưu MP4, tải/xuất]
+```
+
+**Cách thực hiện một video hoàn chỉnh:**
+
+1. Chọn asset MP4 đã tạo hoặc tải từ máy. Kiểm tra file phát được, có thời lượng/kích thước, và chọn đúng bản thành phẩm thay vì poster hay node trung gian.
+2. Nối/cấp dữ liệu cho các công cụ cần dùng theo đúng cổng `Video`, `Audio`, `Text/SRT`. Chọn thứ tự xử lý có ý nghĩa: cắt đoạn dùng trước; chỉnh màu/vừa khung; nếu cần lồng tiếng thì tạo/chọn MP3 và đồng bộ; thêm phụ đề; trộn nhạc; thêm logo; ghép/xuất cuối. Không bắt buộc dùng mọi công cụ.
+3. Điền thông số và chạy node hoặc Run All. Mỗi lần thực hiện tạo output mới; đổi nguồn/thông số làm kết quả cũ **stale**, không tải/đăng nhầm bản cũ. Nếu node lỗi, giữ nguồn và file trung gian để sửa đúng bước. Tác vụ FFmpeg có thể hủy; không xóa tệp gốc khi hủy.
+4. Kiểm tra thành phẩm bằng phát lại: đầu/cuối không bị cắt nhầm, hướng hình và tỷ lệ đúng, âm lượng không vỡ, phụ đề khớp thời gian, chuyển cảnh không tạo khoảng đen, logo nhìn rõ, file MP4 thực sự tải được. Dòng thời gian có thể dùng để chọn/xếp clip; tránh ghép cùng lúc cả clip trung gian và clip cuối của cùng cảnh.
+5. Tải/xuất MP4 cuối và lưu thông tin nguồn, công cụ/tham số, asset đầu ra. Nếu đưa sang đăng bài, chỉ chọn asset video cuối đã xác nhận, không chọn MP3 tách âm hoặc thumbnail.
+
+**Ví dụ lựa chọn:** video quảng cáo 2 cảnh đã ghép nhưng thiếu lời đọc → nhập hai câu thoại, tạo một MP3 TTS hoặc tải giọng đọc riêng → `Đồng bộ lời đọc–cảnh` với 2 clip cảnh → viết/sửa SRT đúng mốc → `Phụ đề` → thêm nhạc nhẹ với mức thấp hơn lời đọc → `Ghép/xuất cuối`. Nếu chỉ cần đổi màu/cắt phần thừa, bỏ toàn bộ TTS/Whisper/nhạc và chạy local.
+
+## 6. Quy trình tối ưu: giảm việc thừa nhưng vẫn giữ kết quả đúng
+
+Tối ưu ở đây là **giảm lượt AI bị gửi lại, giảm tệp lớn qua relay, tránh xử lý lại toàn bộ video và giảm thời gian chờ không rõ nguyên nhân**. Không lấy số tab hoặc tốc độ bấm nút làm thước đo duy nhất. Một lượt AI tạo ảnh/video có thể tính phí và không thể đảo ngược; vì vậy mỗi job phải có ranh giới rõ giữa chuẩn bị, đã gửi, đã lưu và hoàn thành.
+
+### 6.1 Quyết định kênh và model trước khi tạo hàng đợi
+
+```mermaid
+flowchart TD
+  Start[Đầu ra cần có] --> Type{Text, ảnh hay video?}
+  Type -->|Text| T{Cần đọc ảnh?}
+  T -->|Không| TA[Tab text hoặc API Chat Completions]
+  T -->|Có| TV[Adapter vision được model hỗ trợ]
+  Type -->|Ảnh| I{Có ảnh tham chiếu?}
+  I -->|Có| IR[Tab Muse/ChatGPT/Gemini hoặc adapter Google phù hợp]
+  I -->|Không| IA[Tab/API tạo ảnh phù hợp]
+  Type -->|Video| V{Có video nguồn Motion Control?}
+  V -->|Có| VF[fal Motion Control: đúng 1 ảnh + 1 video, hoặc adapter đã xác nhận]
+  V -->|Không| VT[Tab Muse/Grok/Flow hoặc Google video API có quyền]
+  TA --> P[Kiểm tra quyền, chế độ, hạn mức, chi phí, format]
+  TV --> P
+  IR --> P
+  IA --> P
+  VF --> P
+  VT --> P
+  P --> S[Chốt provider/model/tab và snapshot job]
+```
+
+Trước khi xếp đợt, xác định output thật sự cần: nếu chỉ cần **mô tả/kịch bản**, không gọi tạo ảnh/video. Nếu video đã có cảnh mở đầu tốt, không thêm bước tạo ảnh chỉ để “đủ pipeline”. Nếu cần đúng nhận diện nhân vật, chuẩn bị ảnh tham chiếu có vai trò rõ; tách ảnh sản phẩm và ảnh nhân vật trong prompt để AI không tráo đối tượng. Nếu cần giọng đọc chính xác, chuẩn bị audio/SRT cho hậu kỳ, không trông chờ prompt video tự tạo đúng thoại. Với API, kiểm tra model còn quyền và giới hạn input/duration trước khi tạo 50 job; với tab, chọn model/chế độ trong website và kiểm tra composer một lần trước đợt.
+
+### 6.2 Chuẩn hóa đầu vào một lần, rồi đóng băng snapshot
+
+**Bước chuẩn bị ảnh:** kiểm tra MIME, mở giải mã được, dung lượng, hướng ảnh, không dùng file trùng vô ích. Đặt tên/tag dễ đọc (ví dụ `san-pham-do`, `nhan-vat-A`) và dùng `@tag` chỉ cho job cần ảnh đó. Không lặp ảnh như dữ liệu base64 vào mọi trường prompt; để asset ID/tag snapshot trỏ cùng nguồn. Tạo một ảnh gốc đủ chất lượng giúp giảm những lượt AI phải sửa sản phẩm/nhân vật về sau.
+
+**Bước chuẩn bị prompt:** viết một yêu cầu trên mỗi dòng/khối theo đúng chế độ tách; tách phần **bất biến** (phong cách, thương hiệu, điều cấm) khỏi phần **riêng từng sản phẩm/cảnh**. Kiểm tra trước số job dự kiến = số prompt × số bản sao hoặc số sản phẩm × số đầu ra. Với ảnh, chỉ tạo nhiều bản sao khi cần lựa chọn biến thể; nếu mục tiêu là một ảnh dùng cho nhiều video, tạo/lưu một asset rồi tham chiếu lại thay vì tạo N ảnh giống nhau. Với video nhiều cảnh, kịch bản JSON cần được kiểm tra cấu trúc trước khi bắt đầu phần tạo video tốn phí.
+
+**Bước đóng băng:** ngay khi xếp hàng, ghi rõ graph version, input asset IDs, prompt, tùy chọn provider/model, tab preference, tỷ lệ, thời lượng và chính sách hậu kỳ. Thay đổi thư viện/tag/mẫu sau đó chỉ ảnh hưởng job mới. Muốn sửa job chưa gửi, rút về nháp, sửa, tạo snapshot mới. Job đã gửi phải giữ hồ sơ cũ để đối chiếu kết quả và chi phí.
+
+### 6.3 Điều phối tab và số việc song song hợp lý
+
+| Tình huống | Quyết định tối ưu | Vì sao |
+| --- | --- | --- |
+| Một tab AI, nhiều job | Queue tuần tự, một job tại một thời điểm | Không trộn chat/result; giảm lỗi DOM và rate limit. |
+| Hai tab cùng provider | Chỉ tăng concurrency khi dispatcher/provider cho phép | Hai tab không vượt hạn mức provider mặc định. |
+| Job đã chỉ định tab A | Chờ A, kể cả B rảnh | Giữ đúng model/chat/quyền và nguồn nhân vật của job. |
+| Job chọn tự động | Gán một tab sẵn sàng lúc bắt đầu, sau đó giữ cố định | Tăng sử dụng tài nguyên mà không đổi tab giữa các bước. |
+| AI trả 429/xác minh | Hold provider, đọc `Retry-After` hoặc chờ xử lý | Gửi dồn làm lỗi nặng và có thể tính lượt trùng. |
+| Relay remote chập chờn | Nếu cùng máy chuyển sang local cho **job mới**; job đã gửi phải đối chiếu trước | Không dùng mã ghép mới để vô tình gửi lại lượt cũ. |
+
+Giới hạn queue 1–6 là **giới hạn cấp việc toàn hệ thống**, không phải lời hứa có 6 AI chạy đồng thời. Giới hạn thực = min(số tab sẵn sàng, slot provider, giới hạn queue, khả năng tài khoản). Bắt đầu với mức 1, tăng sau khi đã xác nhận kết quả đúng tab và dịch vụ không chặn. Tránh đặt hai job cùng một chat đang được người dùng thao tác thủ công. Khi chạy nền, nếu Chrome/website bị sleep/discard, mở tab kiểm tra và giữ nguyên trạng thái chưa rõ; không “đánh thức” bằng cách gửi prompt lần hai.
+
+### 6.4 Tối ưu nhận và lưu kết quả
+
+**Không đẩy cả file media qua nhiều tầng nếu không cần**, nhưng cũng không lưu URL `blob:` của trang AI như tài sản dài hạn. Kết quả website cần được copy thành bytes trong quyền origin của tab rồi đưa về app; file lớn đi qua remote WSS sẽ phình vì base64, nên tránh tham chiếu/clip vượt giới hạn. API trả URL cần tải an toàn và kiểm MIME/metadata trước khi đóng job. Nếu chỉ có thumbnail/preview, đánh dấu `observed` hoặc `review` chứ không `done`.
+
+Sau mỗi cảnh, lưu asset và checkpoint **ngay**. Ví dụ video 4 cảnh, đã lưu xong cảnh 1–3 nhưng lỗi ở cảnh 4: sau khi người dùng kiểm tra lượt cũ, chỉ tiếp tục phần còn thiếu. Ghép video khi đủ 4 clip hợp lệ. Khi nhận response hai lần sau reconnect, nhận cùng requestId/fingerprint, trả lại asset đã lưu; không tạo hai tệp/không phát lại tác vụ AI. Lịch sử cần cho phép thấy từng cảnh, input snapshot, lỗi và MP4 cuối để truy vết.
+
+### 6.5 Tối ưu hậu kỳ theo thứ tự phụ thuộc

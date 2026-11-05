@@ -15,7 +15,7 @@ if (typeof window !== "undefined") {
 export async function api(path, body) {
   if (path === "jobs" && body && !["google", "openai"].includes(body.provider))
     assertWorkflowTabAvailable(body.tabId);
-  const key = sessionStorage.getItem("mooz-server-access") || "";
+  const key = globalThis.moozDesktop?.accessCode || sessionStorage.getItem("mooz-server-access") || "";
   let response;
   try {
     response = await fetch("/api/" + path, {
@@ -55,9 +55,9 @@ export const providerList = [
   { id: "google", name: "Gemini · API", types: ["text", "image"] },
 ];
 const connectedAICache = new Map();
-export function connectedAI(kind) {
+export function connectedAI(kind, { force = false } = {}) {
   const cached = connectedAICache.get(kind);
-  if (cached && Date.now() - cached.at < 3000) return cached.promise;
+  if (!force && cached && Date.now() - cached.at < 3000) return cached.promise;
   const promise = loadConnectedAI(kind);
   connectedAICache.set(kind, { at: Date.now(), promise });
   return promise;

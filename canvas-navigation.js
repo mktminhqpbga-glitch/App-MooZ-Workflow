@@ -17,6 +17,8 @@ export function createCanvasNavigation({ shell, hud, zoomNode, projectId, getNam
   zoomSummary.append(zoomNode);
   zoomSummary.setAttribute('aria-label', 'Điều chỉnh mức thu phóng');
   zoomControls.append(...controls);
+  zoomControls.addEventListener('click', event => { if(event.target.closest('button')?.textContent.includes('Vừa khung')) zoomMenu.open=false; });
+  document.addEventListener('pointerdown', event => { if(!zoomMenu.contains(event.target)) zoomMenu.open=false; }, { capture:true, signal });
   zoomMenu.append(zoomSummary, zoomControls);
   const tool = (label, name, action) => {
     const control = button('', action);

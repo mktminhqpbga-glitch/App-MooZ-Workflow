@@ -81,6 +81,7 @@ export class ServerJobs {
       record.error = String(e.message || e).slice(0, 1000);
       record.status = record.status === "sent" ? "unknown" : "error";
       record.code = e.code;
+      record.retryAfterMs = e.retryAfterMs;
     } finally {
       record.updatedAt = new Date().toISOString();
       try {

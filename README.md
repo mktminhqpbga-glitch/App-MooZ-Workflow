@@ -27,9 +27,25 @@ Máy chủ mặc định chạy tại loopback, cổng 4174. Để mở ra mạn
 
 ```sh
 npm test
-CHROMIUM_PATH=/usr/bin/chromium npm run test:browser
+npm run build
+CHROMIUM_PATH=/usr/bin/chromium npm run test:all
 ```
 
 Bộ kiểm tra media cần FFmpeg. Kiểm thử AI dùng phản hồi mẫu, không phải tài khoản thật.
 
 Các thông báo giấy phép được giữ tại LICENSE và vendor/mooz/NOTICE.md.
+
+## App macOS Intel và extension
+
+```sh
+npm run package:mac
+npm run test:packaged
+```
+
+Chạy hai lệnh này trên macOS Intel để tạo và kiểm tra ZIP/DMG. Trên Linux chỉ có thể cross-build ZIP bằng `npm run package:mac:zip`; không thể dùng nó để xác nhận app chạy trên macOS. macOS tối thiểu 13; bản phát hành chưa ký/notarize. Extension kèm trong Cài đặt và `downloads/MooZ-Connect.zip`.
+
+GitHub Actions `.github/workflows/release-mac.yml` chạy toàn bộ kiểm thử, đóng gói Mac Intel, mở kiểm tra chính app đã đóng gói (gồm FFmpeg MP4 thật), rồi mới tạo release latest để Cài đặt tải về. Download latest chỉ có sau khi workflow phát hành thành công.
+
+Batch có một khu làm việc, ảnh sản phẩm/nhân vật tùy chọn và queue riêng. `Thêm & tạo node` chỉ chốt kế hoạch; `Chạy hàng đợi` mới gửi AI. Job đang gửi khi gián đoạn cần đối chiếu, không tự gửi lại. Hậu kỳ thông thường xử lý local bằng WASM; TTS/Whisper cần OpenAI key phía máy chủ và có thông báo gửi dữ liệu.
+
+Thông báo media/font bổ sung ở `vendor/mooz/THIRD-PARTY-NOTICES.md`. Đối chiếu phạm vi còn chưa xác thực ở `docs/USER-REQUEST-REVIEW.md`.

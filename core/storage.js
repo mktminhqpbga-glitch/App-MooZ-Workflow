@@ -67,6 +67,17 @@ export async function read(store, id) {
     r.onerror = () => reject(r.error);
   });
 }
+export async function mutate(storeName, id, change) {
+  const db = await contentDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite'), store = tx.objectStore(storeName), request = store.get(id); let result, error;
+    request.onsuccess = () => {
+      try { result = change(request.result); if (result) store.put(result); }
+      catch (caught) { error = caught; tx.abort(); }
+    };
+    tx.oncomplete = () => resolve(result); tx.onerror = () => reject(error || tx.error); tx.onabort = () => reject(error || tx.error);
+  });
+}
 export async function remove(store, id) {
   const db = await contentDB();
   return new Promise((resolve, reject) => {

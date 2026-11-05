@@ -1,15 +1,18 @@
 import { createProject, exportProject } from "./projects.js";
-import { readAsset, toDataURL, addAsset, remove } from "./storage.js";
+import { readAsset, toDataURL, addAsset, remove, list } from "./storage.js";
 import { validateGraph } from "./graph.js";
+import { outputKey, isStale } from "./output-state.js";
 import { nodeAssetIds, remapPromptAssets } from "./references.js";
 export async function exportBundle(project) {
   const clean = JSON.parse(exportProject(project)),
     assets = [];
+  const snapshots = new Map();
+  for (const job of (await list("jobs")).filter(job=>job.projectId===project.id)) for(const [id,asset] of Object.entries(job.inputAssets||{})) snapshots.set(id,{...asset,id,source:"upload"});
   let bytes = 0;
   for (const id of new Set(
     clean.graph.nodes.flatMap(nodeAssetIds),
   )) {
-    const a = await readAsset(id);
+    const a = await readAsset(id) || snapshots.get(id);
     if (!a)
       throw Error(
         "Thiếu tài sản: " + id + ". Không tạo bản sao lưu thiếu media.",
@@ -41,6 +44,7 @@ export async function importBundle(text) {
     graph = validateGraph(data.graph),
     map = new Map(),
     created = [];
+  const freshOutputs = new Set(graph.nodes.filter(node=>node.data.outputKey&&!isStale(graph,node)).map(node=>node.id));
   let bytes = 0;
   try {
     for (const a of data.assets) {
@@ -83,6 +87,7 @@ export async function importBundle(text) {
       if (node.data.referenceOrder)
         node.data.referenceOrder = JSON.stringify(JSON.parse(node.data.referenceOrder).filter(id => map.has(id)).map(id => map.get(id)));
     }
+    for (const node of graph.nodes) if(freshOutputs.has(node.id))node.data.outputKey=outputKey(graph,node.id);
     project.graph = graph;
     return { project, created };
   } catch (e) {

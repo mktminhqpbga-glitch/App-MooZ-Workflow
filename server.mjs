@@ -4,12 +4,13 @@ import { resolve, extname } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { ChromeConnection } from "./server/connection.mjs";
 import { ServerJobs } from "./server/jobs.mjs";
-import { apiProviders, generateAPI } from "./server/providers.mjs";
+import { apiProviders, generateAPI, validateAPIInput } from "./server/providers.mjs";
+import { speechAPI, validateSpeech } from "./server/speech.mjs";
 import { AssistantTab } from "./server/assistant-tab.mjs";
 const root = process.cwd(),
   host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 4174),
-  runtime = resolve(root, ".mooz-runtime");
+  runtime = resolve(process.env.MOOZ_RUNTIME_DIR || resolve(root, ".mooz-runtime"));
 if (
   !["127.0.0.1", "localhost"].includes(host) &&
   !process.env.MOOZ_ACCESS_TOKEN
@@ -22,6 +23,7 @@ await assistantTab.init();
 const jobs = new ServerJobs(
   resolve(runtime, "requests"),
   async (input, sent) => {
+    if (["voiceover", "transcribe"].includes(input.operation)) { validateSpeech(input); await sent(); return speechAPI(input); }
     if (
       !["text", "image", "video"].includes(input.mediaType) ||
       typeof input.prompt !== "string" ||
@@ -40,12 +42,15 @@ const jobs = new ServerJobs(
         ))
     )
       throw Error("Ảnh tham chiếu không hợp lệ.");
+    const referenceSizes=(input.referenceImages||[]).map(value=>Buffer.byteLength(value.slice(value.indexOf(',')+1),'base64'));
+    if(referenceSizes.some(size=>size>8*1024*1024)||referenceSizes.reduce((sum,size)=>sum+size,0)>32*1024*1024)throw Error('Ảnh tham chiếu vượt giới hạn 8 MB/ảnh hoặc tổng 32 MB.');
     if (apiProviders[input.provider]) {
       if (
         !process.env[apiProviders[input.provider].key] ||
         !apiProviders[input.provider].types.includes(input.mediaType)
       )
         throw Error("Chưa cấu hình API phù hợp.");
+      validateAPIInput(input);
       await sent();
       return generateAPI(input);
     }
@@ -85,6 +90,22 @@ const staticFiles = new Set([
   "media-tools.js",
   "image-workbench.js",
   "icons.js",
+  "post-workbench.js",
+  "downloads/release.json",
+  "core/queue-plan.js",
+  "core/output-state.js",
+  "core/flow-plan.js",
+  "core/queue-storage.js",
+  "core/queue-runner.js",
+  "core/local-media.js",
+  "vendor/mooz/workflow-runtime.js",
+  "vendor/mooz/media-studio.js",
+  "vendor/mooz/ffmpeg/ffmpeg.js",
+  "vendor/mooz/ffmpeg/814.ffmpeg.js",
+  "vendor/mooz/ffmpeg/ffmpeg-core.js",
+  "vendor/mooz/ffmpeg/ffmpeg-core.wasm",
+  "vendor/mooz/fonts/DejaVuSans.ttf",
+
   "vendor/mooz/canvas-image-editor.js",
   "vendor/mooz/canvas-image-editor.css",
   "client-api.js",
@@ -105,7 +126,7 @@ async function body(req) {
     chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 30 * 1024 * 1024) throw Error("Dữ liệu gửi vượt 30 MB.");
+    if (size > 50 * 1024 * 1024) throw Error("Dữ liệu gửi vượt 50 MB.");
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString() || "{}");
@@ -131,6 +152,11 @@ const server = createServer(async (req, res) => {
         return json(res, 401, {
           error: "Nhập mã truy cập máy chủ trong Cài đặt.",
         });
+      if (path === "/api/speech" && req.method === "POST") {
+        const input = await body(req);
+        validateSpeech(input);
+        return json(res, 200, await jobs.run({ requestId: input.requestId, provider: 'openai', operation: input.operation, text: input.text || '', data: input.data || '', settings: input.settings || {} }));
+      }
       if (path === "/api/status" && req.method === "GET")
         return json(res, 200, {
           chrome: chrome.status(),
@@ -211,7 +237,7 @@ const server = createServer(async (req, res) => {
     const data = await readFile(resolve(root, file));
     res.writeHead(200, {
       "Content-Type":
-        { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" }[
+        { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".wasm": "application/wasm", ".ttf": "font/ttf", ".json": "application/json" }[
           extname(file)
         ] + "; charset=utf-8",
       "Cache-Control": "no-store",

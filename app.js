@@ -1,3 +1,4 @@
+import { mountPostStudio } from "./post-workbench.js";
 import { mountStudio } from "./studio.js";
 import { mountLibrary, mountSettings, mountBatch } from "./modules.js";
 import { mountProjects, mountProject } from "./projects-ui.js";
@@ -8,6 +9,7 @@ const paths = {
   canvas: "M3 4h18v16H3zM8 4v16M8 15l4-4 4 4 3-3",
   images: "M6 3h15v15M3 6h15v15H3zM3 17l5-5 4 4 3-3 3 3M8 10h.01",
   videos: "M3 6h15v15H3zM6 3h15v15M9 10l5 3-5 3z",
+  post: "M3 6h18v15H3zM7 3v6M17 3v6M7 13h10M12 10v8",
   library: "M3 5h7l2 3h9v13H3z",
   settings: "M4 7h16M4 17h16M9 4v6M15 14v6",
   appearance:
@@ -40,6 +42,7 @@ const modules = [
     empty: "Chưa có tác vụ tạo video",
     detail: "Bộ tạo video hàng loạt sẽ được kết nối ở bước tiếp theo.",
   },
+  { id: "post", title: "Hậu kỳ", description: "Xử lý video và âm thanh local.", foot: "Hậu kỳ media", empty: "Chưa có video", detail: "Chọn video nguồn." },
   {
     id: "library",
     title: "Kho",
@@ -213,11 +216,11 @@ async function route() {
           ? appearance()
           : `<a class="back" href="#home">← Về tổng quan</a><span class="eyebrow">MOOZ CVN</span><h1>${m.title}</h1><p class="intro">${m.description}</p><section class="placeholder">${icon(m.id)}<h2>${m.empty}</h2><p>${m.detail}</p><span class="badge">Chưa triển khai trong bước này</span></section>`;
   closeMobile();
-  if (["canvas", "library", "settings", "images", "videos"].includes(key)) {
+  if (["canvas", "library", "settings", "images", "videos", "post"].includes(key)) {
     const slot = document.createElement("section");
     $("main").replaceChildren(slot);
     const task =
-      key === "canvas"
+      key === "post" ? mountPostStudio(slot) : key === "canvas"
         ? mountStudio(slot, canvasId)
         : key === "library"
           ? mountLibrary(slot)

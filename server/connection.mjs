@@ -126,7 +126,7 @@ export class ChromeConnection {
       return { kind: "text", text: result.text };
     if (
       typeof result.url !== "string" ||
-      !/^data:(image|video)\//.test(result.url)
+      !new RegExp("^data:" + input.mediaType + "/").test(result.url)
     )
       throw Error(
         "Kết quả chưa có media nhúng hợp lệ. Kiểm tra tab và tải tệp về Kho.",

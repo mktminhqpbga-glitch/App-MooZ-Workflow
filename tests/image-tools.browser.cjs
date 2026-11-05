@@ -30,6 +30,7 @@ const { chromium } = require("playwright"),
       errors = [],
       sent = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    await page.route('**/api/status',route=>route.fulfill({json:{providers:[{id:'openai',ready:true,types:['text','image']}],chrome:{connected:true}}}));
     await page.goto(url);
     const image = await page.evaluate(() => {
       const c = document.createElement("canvas");
@@ -74,14 +75,12 @@ const { chromium } = require("playwright"),
       .getByLabel("AI thực hiện", { exact: true })
       .selectOption("openai");
     await node.locator(".inline-settings summary").click();
-    await node
-      .getByLabel("Chất lượng ảnh", { exact: true })
-      .selectOption("high");
-    await node.getByLabel("Số ảnh", { exact: true }).selectOption("2");
+    await node.getByRole('group',{name:'Chất lượng',exact:true}).getByRole('button',{name:'Cao',exact:true}).click();
+    await node.getByRole('group',{name:'Số lượng ảnh',exact:true}).getByRole('button',{name:'2 ảnh',exact:true}).click();
     await node.locator(".inline-settings summary").click();
     await node.getByRole("button", { name: "Phong cách", exact: true }).click();
     await page.getByRole("button", { name: "Điện ảnh", exact: true }).click();
-    await node.getByRole("button", { name: "Máy ảnh", exact: true }).click();
+    await node.getByLabel("Ống kính và máy ảnh",{exact:true}).click();
     await page.getByLabel("Tiêu cự", { exact: true }).selectOption("85");
     await page.getByRole("button", { name: "Áp dụng", exact: true }).click();
     await node
@@ -114,6 +113,7 @@ const { chromium } = require("playwright"),
     await node.locator("img").waitFor();
     await node.locator(".cvn-node-body img").click();
     await page.locator(".cvn-image-toolbar:not([hidden])").waitFor();
+    await page.getByLabel("Điều chỉnh mức thu phóng", { exact:true }).click();
     await page.getByRole("button", { name: "Vừa khung", exact: true }).click();
     if (process.env.REVIEW_DIR) {
       await fs.mkdir(process.env.REVIEW_DIR, { recursive: true });
@@ -146,9 +146,9 @@ const { chromium } = require("playwright"),
       .locator(".cvn-dock > button")
       .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")));
     assert.deepEqual(labels, [
-      "Chọn đối tượng",
+      "Di chuyển (V)",
       "Phong cách",
-      "Nhân vật",
+      "Kho",
       "Công cụ",
       "Lịch sử",
       "Phím tắt",
@@ -156,7 +156,7 @@ const { chromium } = require("playwright"),
     ]);
     assert.equal(await page.locator(".cvn-orb").count(), 1);
     await page.getByRole("button", { name: "Phím tắt", exact: true }).click();
-    await page.getByText("V: chọn đối tượng", { exact: true }).waitFor();
+    await page.locator(".shortcut-grid").waitFor();
     await page
       .locator(".cvn-resource-sheet")
       .getByRole("button", { name: "Đóng", exact: true })
@@ -198,6 +198,7 @@ const { chromium } = require("playwright"),
       () => document.querySelectorAll(".cvn-node").length === 7,
     );
     assert.equal(sent.length, 2, "Local tools never send AI requests");
+    await page.getByLabel("Điều chỉnh mức thu phóng", { exact:true }).click();
     await page.getByRole("button", { name: "Vừa khung", exact: true }).click();
     if (process.env.REVIEW_DIR) {
       await fs.mkdir(process.env.REVIEW_DIR, { recursive: true });

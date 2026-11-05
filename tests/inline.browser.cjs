@@ -49,6 +49,7 @@ const { chromium } = require("playwright"),
       errors = [],
       sent = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    await page.route('**/api/status',route=>route.fulfill({json:{providers:[{id:'openai',ready:true,types:['text','image']}],chrome:{connected:true}}}));
     await page.goto(url);
     const image = await page.evaluate(() => {
       const c = document.createElement("canvas");
@@ -120,13 +121,18 @@ const { chromium } = require("playwright"),
     await page.getByLabel("Thêm vào canvas", { exact: true }).click();
     await page.getByRole("button", { name: "Video", exact: true }).click();
     const videoNode = page.locator(".generation-node").last();
+    const dragTitle=await videoNode.locator('.cvn-node-title').boundingBox();await page.mouse.move(dragTitle.x+30,dragTitle.y+10);await page.mouse.down();await page.mouse.move(dragTitle.x+630,dragTitle.y+10,{steps:5});await page.mouse.up();
+    await page.mouse.move(1400,100);await page.mouse.down({button:'middle'});await page.mouse.move(1220,100,{steps:5});await page.mouse.up({button:'middle'});
+    assert.equal(await page.locator('.cvn-node').count(),2,'middle mouse does not paste a phantom node');
+    await videoNode.locator('.cvn-node-title').click();
+
     await videoNode
       .getByLabel("Nội dung yêu cầu", { exact: true })
       .fill("Video từ prompt bên dưới");
     await videoNode
       .getByLabel("AI thực hiện", { exact: true })
       .selectOption("grok");
-    await videoNode.locator(".inline-connection summary").click();
+    await videoNode.locator(".inline-connection").evaluate(menu=>{menu.open=true;});
     await videoNode
       .getByLabel("Tab chạy luồng", { exact: true })
       .selectOption("8");
@@ -136,6 +142,7 @@ const { chromium } = require("playwright"),
     await videoNode.locator("video").waitFor();
     assert.equal(sent[1].tabId, 8);
     assert.equal(sent[1].prompt, "Video từ prompt bên dưới");
+    await page.getByLabel("Điều chỉnh mức thu phóng", { exact:true }).click();
     await page.getByRole("button", { name: "Vừa khung", exact: true }).click();
     assert.equal(await page.locator(".inline-composer:visible").count(), 1);
     await imageNode.locator(".cvn-node-title").click({ modifiers: ["Shift"] });
@@ -145,7 +152,7 @@ const { chromium } = require("playwright"),
     assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), true);
     await imageNode.locator(".inline-settings summary").click();
     for (const ratio of ["9:16", "1:1", "21:9"]) {
-      await imageNode.getByLabel("Tỷ lệ", { exact: true }).selectOption(ratio);
+      await imageNode.getByRole("button", { name: "Khung " + ratio, exact: true }).click();
       const measured = await imageNode.locator(".cvn-node-body").evaluate(e => e.offsetWidth / e.offsetHeight);
       const [w, h] = ratio.split(":").map(Number);
       assert.ok(Math.abs(measured - w / h) < .03, `${ratio} frame changes immediately`);
@@ -154,17 +161,18 @@ const { chromium } = require("playwright"),
     await videoNode.locator(".cvn-node-title").click({ modifiers: ["Shift"] });
     assert.equal(await page.locator(".cvn-node.selected").count(), 1);
     assert.equal(await imageNode.locator(".inline-composer").isVisible(), false);
-    assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), false);
+    assert.equal(await page.locator(".cvn-video-toolbar").isVisible(), true);
     await page.locator(".cvn-viewport").click({ position: { x: 15, y: 150 } });
     assert.equal(await page.locator(".cvn-node.selected").count(), 0);
     assert.equal(await page.locator(".inline-composer:visible").count(), 0);
     assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), false);
     // Wait for the debounced project write before verifying restoration.
-    await page.waitForFunction(async () => {
-      const { ProjectRepository } = await import("./core/projects.js");
-      const id = location.hash.split("/").pop();
-      return (await new ProjectRepository().get(id)).graph.nodes.find(n => n.type === "generateImage").data.size === "21:9";
-    });
+    let saved = false;
+    for (let attempt=0;attempt<50;attempt++) {
+      saved=await page.evaluate(async()=>{const {ProjectRepository}=await import('./core/projects.js');return(await new ProjectRepository().get(location.hash.split('/').pop())).graph.nodes.find(n=>n.type==='generateImage').data.size==='21:9';});
+      if(saved)break;await page.waitForTimeout(50);
+    }
+    assert.equal(saved,true,'latest frame ratio is durably stored');
     await page.reload();
     await page.locator(".generation-node video").waitFor();
     assert.equal(await page.locator(".inline-composer:visible").count(), 0);
@@ -191,17 +199,16 @@ const { chromium } = require("playwright"),
         path: path.join(process.env.REVIEW_DIR, "inline-image-video.png"),
       });
     }
-    await page
-      .getByRole("button", { name: "Đầu ra Tạo ảnh", exact: true })
-      .click();
+    await page.getByLabel('Điều chỉnh mức thu phóng',{exact:true}).click();await page.getByRole('button',{name:'Vừa khung',exact:true}).click();
+    const sourcePort=page.getByRole('button',{name:'Đầu ra Tạo ảnh',exact:true}),point=await sourcePort.boundingBox();await page.mouse.move(point.x+point.width/2,point.y+point.height/2);await sourcePort.click();
     await page
       .locator(".port-menu")
-      .getByRole("button", { name: "Tạo video", exact: true })
+      .getByRole("button", { name: "Tạo video", exact: true }).last()
       .click();
     await page.waitForFunction(
       () => document.querySelectorAll(".generation-node").length === 3,
     );
-    assert.equal(await page.locator(".cvn-wires path").count(), 1);
+    assert.equal(await page.locator(".cvn-wires g[data-edge-id]").count(), 1);
     assert.deepEqual(errors, []);
     console.log(
       "PASS inline media: prompt is below image/video; no old setup buttons or dialog; exact prompt and tab submitted; decoded image/video returned; prompt and results persist after reload. Fixture AI only.",

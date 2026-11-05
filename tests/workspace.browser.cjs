@@ -30,6 +30,7 @@ const { chromium } = require("playwright"),
       errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("dialog", (d) => d.accept());
+    await page.route('**/api/status',route=>route.fulfill({json:{providers:[{id:'openai',ready:true,types:['text','image']}],chrome:{connected:true}}}));
     await page.goto(url);
     const image = await page.evaluate(() => {
       const c = document.createElement("canvas");
@@ -73,7 +74,7 @@ const { chromium } = require("playwright"),
       .fill("Đầu vào có kết nối");
     await page.getByLabel("Thêm vào canvas", { exact: true }).click();
     await page
-      .getByRole("button", { name: "Tạo văn bản", exact: true })
+      .getByRole("button", { name: "Kịch bản", exact: true })
       .click();
     await page
       .getByLabel("Nội dung yêu cầu", { exact: true })
@@ -81,12 +82,12 @@ const { chromium } = require("playwright"),
     await page
       .getByLabel("AI thực hiện", { exact: true })
       .selectOption("openai");
-    await page.getByRole("button", { name: "Tham chiếu", exact: true }).click();
-    await page.locator(".inline-chooser").getByRole("button").first().click();
+    const port=page.locator('.generation-node .cvn-port.input');const portBox=await port.boundingBox();await page.mouse.move(portBox.x+portBox.width/2,portBox.y+portBox.height/2);await port.click();
+    await page.locator('.port-menu').getByRole('button',{name:'Prompt',exact:true}).click();
     await page
       .getByRole("button", { name: "Gửi tạo văn bản", exact: true })
       .click();
-    await page.getByText("Kết quả kiểm chứng", { exact: true }).waitFor();
+    await page.waitForFunction(()=>document.querySelector('[aria-label="Nội dung kịch bản"]')?.value==='Kết quả kiểm chứng');
     assert.equal(
       await page
         .getByRole("button", { name: "Thiết lập", exact: true })
@@ -100,6 +101,7 @@ const { chromium } = require("playwright"),
       buffer: Buffer.from(image.split(",")[1], "base64"),
     });
     await page.locator(".cvn-node img").waitFor();
+    await page.getByLabel("Điều chỉnh mức thu phóng", { exact:true }).click();
     await page.getByRole("button", { name: "Vừa khung", exact: true }).click();
     if (process.env.REVIEW_DIR) {
       await fs.mkdir(process.env.REVIEW_DIR, { recursive: true });
@@ -109,8 +111,8 @@ const { chromium } = require("playwright"),
     }
     await page.reload();
     await page.locator(".cvn-node img").waitFor();
-    await page.getByText("Kết quả kiểm chứng", { exact: true }).waitFor();
-    assert.equal(await page.locator(".cvn-wires path").count(), 1);
+    await page.waitForFunction(()=>document.querySelector('[aria-label="Nội dung kịch bản"]')?.value==='Kết quả kiểm chứng');
+    assert.equal(await page.locator(".cvn-wires g[data-edge-id]").count(), 1);
     await page.goto(url + "/#library");
     await page.getByRole("button", { name: "Đầu vào", exact: true }).click();
     await page.locator(".library-card").waitFor();
@@ -134,13 +136,15 @@ const { chromium } = require("playwright"),
     await page.getByRole("button", { name: "Xóa", exact: true }).click();
     await page.getByText("Chưa có mục nào trong Prompt.").waitFor();
     await page.goto(url + "/#images");
+    await page.getByLabel("Cách tách prompt",{exact:true}).selectOption("lines");
     await page
       .getByLabel("AI hàng loạt", { exact: true })
       .selectOption("openai");
     await page
       .getByLabel("Prompt hàng loạt", { exact: true })
       .fill("Ảnh thứ nhất\nẢnh thứ hai");
-    await page.getByRole("button", { name: "Xếp tác vụ vào hàng đợi" }).click();
+    await page.getByRole("button", { name: "Thêm & tạo node" }).click();
+    await page.getByRole("button",{name:"Chạy hàng đợi",exact:true}).click();
     for (let i = 0; i < 100; i++) {
       const count = await page.evaluate(async () => {
         const { list } = await import("./core/storage.js");
@@ -194,6 +198,7 @@ const { chromium } = require("playwright"),
     await page.waitForFunction(
       () => document.querySelectorAll(".library-card").length === 1,
     );
+    await page.unroute("**/api/status");
     await page.goto(url + "/#settings");
     await page
       .getByRole("button", { name: "Kiểm tra kết nối", exact: true })

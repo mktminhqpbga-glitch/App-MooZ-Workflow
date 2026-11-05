@@ -3,16 +3,24 @@ const dataNodeTypes = {
   prompt: { inputs: {}, outputs: { text: "text" } },
   imageInput: { inputs: {}, outputs: { image: "image" } },
   videoInput: { inputs: {}, outputs: { video: "video" } },
-  generateText: { inputs: { prompt: "text" }, outputs: { text: "text" } },
+  audioInput: { inputs: {}, outputs: { audio: "audio" } },
+  negativePrompt: { inputs: {}, outputs: { text: "text" } },
+  generateText: { inputs: { prompt: "text", reference: "image", negative: "text" }, outputs: { text: "text" } },
   generateImage: {
-    inputs: { prompt: "text", reference: "image", video: "video" },
+    inputs: { prompt: "text", reference: "image", video: "video", negative: "text" },
     outputs: { image: "image" },
   },
   generateVideo: {
-    inputs: { prompt: "text", reference: "image", video: "video" },
+    inputs: { prompt: "text", reference: "image", video: "video", negative: "text" },
     outputs: { video: "video" },
   },
   preview: { inputs: { media: "media" }, outputs: {} },
+  captureLastFrame: { inputs: { video: "video" }, outputs: { image: "image" } },
+  assembleVideo: { inputs: { videos: "video", audio: "audio" }, outputs: { video: "video" } },
+  ...Object.fromEntries(['videoTrim','videoRotate','videoColor','frameFit','audioMix','subtitles','voiceSync','transition','speed','watermark'].map(type => [type, { inputs: { video: "video", audio: "audio", text: "text", reference: "image" }, outputs: { video: "video" } }])),
+  audioExtract: { inputs: { video: "video" }, outputs: { audio: "audio" } },
+  voiceover: { inputs: { text: "text" }, outputs: { audio: "audio" } },
+  transcribe: { inputs: { media: "media" }, outputs: { text: "text" } },
 };
 // Every node can participate in workflow ordering; native data ports keep their types.
 export const nodeTypes = Object.freeze(Object.fromEntries(
@@ -46,6 +54,8 @@ const allowed = [
   "resultAssets",
   "referenceOrder",
   "rating",
+  "outputKey",
+  "localSettings", "captions", "sceneIndex", "sceneCount", "referenceRoles", "negativePrompt",
 ];
 export const emptyGraph = () => ({
   nodes: [],
@@ -88,7 +98,13 @@ export function validateGraph(value) {
     for (const key of allowed) {
       if (!Object.hasOwn(n.data, key)) continue;
       const v = n.data[key];
-      if (["resultAssets", "referenceOrder"].includes(key)) {
+      if (["sceneIndex", "sceneCount"].includes(key)) {
+        if (!Number.isInteger(v) || v < 1 || v > 12) throw Error("Chỉ hỗ trợ 1–12 cảnh.");
+      } else if (["localSettings", "referenceRoles"].includes(key)) {
+        if (typeof v !== 'string' || v.length > 50000) throw Error('Thông số local không hợp lệ.');
+        let parsed; try { parsed = JSON.parse(v); } catch { throw Error('Thông số local cần JSON hợp lệ.'); }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error('Thông số local cần một đối tượng.');
+      } else if (["resultAssets", "referenceOrder"].includes(key)) {
         let ids;
         try {
           ids = JSON.parse(v);
@@ -151,7 +167,9 @@ export function validateGraph(value) {
     )
       throw Error("Dây nối đã tồn tại.");
     if (
-      !["reference", "workflow"].includes(e.targetPort) &&
+      !["reference", "workflow", "videos"].includes(e.targetPort) &&
+      !(e.targetPort === 'video' && ['transition','voiceSync'].includes(t.type)) &&
+      !(e.targetPort === 'audio' && t.type === 'voiceSync') &&
       edges.some(
         (old) => old.target === e.target && old.targetPort === e.targetPort,
       )
@@ -268,6 +286,12 @@ export class GraphController {
           id: crypto.randomUUID(),
           nodeIds: g.nodeIds.map((id) => map.get(id)),
         });
+    } else if (command.type === 'reorderInputs') {
+      const edges = next.edges.filter(edge => edge.target === command.target && edge.targetPort === command.port);
+      if (!Array.isArray(command.edgeIds) || command.edgeIds.length !== edges.length || new Set(command.edgeIds).size !== edges.length || command.edgeIds.some(id => !edges.some(edge => edge.id === id))) throw Error('Thứ tự đầu vào không hợp lệ.');
+      const position = next.edges.findIndex(edge => edges.some(item => item.id === edge.id));
+      next.edges = next.edges.filter(edge => !edges.some(item => item.id === edge.id));
+      next.edges.splice(Math.max(0,position),0,...command.edgeIds.map(id => edges.find(edge => edge.id === id)));
     } else if (command.type === "moveNodes") {
       for (const move of command.moves) {
         const n = next.nodes.find((n) => n.id === move.id);

@@ -1,3 +1,5 @@
+import { mergeJobOutputs, isStale } from "./core/output-state.js";
+import { openPostWorkbench } from "./post-workbench.js";
 import { mountAssistantChat } from "./assistant-ui.js";
 import { nodeAssetIds, promptAssetIds } from "./core/references.js";
 import { availableImageTools } from "./core/capabilities.js";
@@ -19,9 +21,11 @@ import {
   list,
   remove,
 } from "./core/storage.js";
-import { createJob, startJob, stopJob } from "./core/runner.js";
+import { createJob, startJob, stopJob, inspectJob, resumeJob } from "./core/runner.js";
 import { api, providerList, connectedAI, el, button, notice } from "./client-api.js";
 const repo = new ProjectRepository();
+const localNodeNames = { captureLastFrame:'Lấy frame cuối', assembleVideo:'Ghép / xuất MP4',videoTrim:'Cắt video',videoRotate:'Xoay / lật',videoColor:'Chỉnh màu',frameFit:'Vừa khung',audioExtract:'Tách MP3',audioMix:'Trộn nhạc',subtitles:'Phụ đề SRT',voiceSync:'Đồng bộ lời đọc',transition:'Chuyển cảnh',speed:'Tốc độ',watermark:'Logo',voiceover:'Lồng tiếng AI',transcribe:'Nhận diện SRT AI' };
+
 export async function mountStudio(host, id) {
   if (!id) {
     host.innerHTML =
@@ -187,6 +191,12 @@ export async function mountStudio(host, id) {
   project = await repo.markOpened(id);
   if (!host.isConnected) return () => {};
   if (!project) { host.textContent = "Dự án đã bị xóa."; return () => {}; }
+  const previousJobs = (await list('jobs')).filter(job => job.projectId === id).sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+  const snapshotAssets = new Map();
+  for (const job of previousJobs) for (const [assetId, asset] of Object.entries(job.inputAssets || {})) snapshotAssets.set(assetId, { ...asset, id: assetId });
+  const storedGraph = JSON.stringify(project.graph);
+  for (const job of previousJobs) project.graph = mergeJobOutputs(project.graph, job);
+  const recoveredOutputs = JSON.stringify(project.graph) !== storedGraph;
   let controller = new GraphController(project.graph),
     selection = new Set(),
     urls = new Map(),
@@ -209,6 +219,7 @@ export async function mountStudio(host, id) {
     pendingLink = null,
     linkDrag = null,
     suppressPortClickUntil = 0;
+  let suppressMiddlePasteUntil = 0;
   void api("status")
     .then((value) => {
       if (!disposed) {
@@ -220,6 +231,15 @@ export async function mountStudio(host, id) {
   document.body.classList.add("studio-mode");
   host.classList.add("studio-host");
   host.replaceChildren();
+  const applyJobOutput = job => {
+    if (job.projectId !== id || disposed) return;
+    const merged = mergeJobOutputs(controller.snapshot(), job);
+    for (const node of merged.nodes) {
+      const current = controller.snapshot().nodes.find(item => item.id === node.id);
+      if (JSON.stringify(current.data) !== JSON.stringify(node.data)) controller.execute({ type: 'updateNode', id: node.id, patch: node.data });
+    }
+    render(); void persist();
+  };
   const abort = new AbortController(),
     shell = el("section", undefined, "cvn-studio"),
     viewport = el("div", undefined, "cvn-viewport"),
@@ -260,6 +280,8 @@ export async function mountStudio(host, id) {
     projectOptions = el("div");
   projectToggle.setAttribute("aria-label", "Menu dự án");
   projectOptions.append(
+    button("Chạy toàn bộ luồng", () => showRunGraph()),
+    button("Lượt chạy & tiếp tục", () => showProjectRuns()),
     button("Lưu luồng vào Kho", async () => {
       await write("templates", {
         id: crypto.randomUUID(),
@@ -299,6 +321,9 @@ export async function mountStudio(host, id) {
   for (const [type, label, glyph] of [
     ["prompt", "Văn bản", "text"], ["generateText", "Kịch bản", "sparkles"],
     ["generateImage", "Ảnh", "image"], ["generateVideo", "Video", "video"],
+    ["audioInput", "Âm thanh", "music"],
+    ["assembleVideo", "Ghép MP4", "video"],
+    ["videoTrim", "Cắt video", "video"],
   ]) {
     const item = button("", async () => { addMenu.open = false; await addNode(type); });
     item.append(icon(glyph), el("span", label));
@@ -307,7 +332,7 @@ export async function mountStudio(host, id) {
   }
   addOptions.append(el("hr"), el("span", "Thêm tài nguyên", "dock-add-section"));
   for (const [label, glyph, action] of [
-    ["Tải lên", "upload", () => { files.accept = "image/*,video/*"; files.click(); }],
+    ["Tải lên", "upload", () => { files.accept = "image/*,video/*,audio/*"; files.click(); }],
     ["Chọn từ lịch sử tạo", "clock", () => showHistory()],
   ]) {
     const item = button("", () => { addMenu.open = false; return action(); });
@@ -378,7 +403,7 @@ export async function mountStudio(host, id) {
   files.type = "file";
   files.multiple = true;
   files.hidden = true;
-  files.accept = "image/*,video/*";
+  files.accept = "image/*,video/*,audio/*";
   files.onchange = async () => {
     try {
       for (const f of files.files) {
@@ -626,8 +651,8 @@ export async function mountStudio(host, id) {
     void persist();
   }
   async function addNode(type, sourceId = null, position = null) {
-    if (type === "imageInput" || type === "videoInput") {
-      files.accept = type === "imageInput" ? "image/*" : "video/*";
+    if (["imageInput","videoInput","audioInput"].includes(type)) {
+      files.accept = type === "imageInput" ? "image/*" : type === "audioInput" ? "audio/*" : "video/*";
       files.click();
       return;
     }
@@ -643,7 +668,7 @@ export async function mountStudio(host, id) {
           generateImage: "Tạo ảnh",
           generateVideo: "Tạo video",
           generateText: "Tạo văn bản",
-        }[type],
+        }[type] || localNodeNames[type] || type,
         text: "",
         studioPrompt: "",
         provider: "muse",
@@ -684,7 +709,7 @@ export async function mountStudio(host, id) {
     const center = canvasMiddle();
     const n = {
       id: crypto.randomUUID(),
-      type: a.kind === "video" ? "videoInput" : "imageInput",
+      type: a.kind === "video" ? "videoInput" : a.kind === "audio" ? "audioInput" : "imageInput",
       x: center.x - 170,
       y: center.y - 110,
       data: { customName: a.name, assetId: a.id },
@@ -695,7 +720,7 @@ export async function mountStudio(host, id) {
   }
   async function assetView(assetId, container) {
     try {
-      const a = await readAsset(assetId);
+      const a = await readAsset(assetId) || snapshotAssets.get(assetId);
       if (disposed || !container.isConnected) return;
       if (!a) {
         container.append(el("p", "Tài sản đã bị xóa khỏi Kho."));
@@ -810,7 +835,7 @@ export async function mountStudio(host, id) {
       if (n.data.assetId) {
         if (!card.isConnected) stage.append(card);
         if (!keepMedia) void assetView(n.data.assetId, body);
-      } else if (n.type === "prompt") {
+      } else if (["prompt", "negativePrompt"].includes(n.type)) {
         const text = el("textarea");
         text.value = n.data.text || "";
         text.placeholder = "Viết ý tưởng của bạn…";
@@ -822,6 +847,8 @@ export async function mountStudio(host, id) {
             patch: { text: text.value },
           });
         body.append(text);
+      } else if (localNodeNames[n.type]) {
+        body.append(icon(['voiceover','audioExtract'].includes(n.type)?'music':'video'),el('p',localNodeNames[n.type]));
       } else if (n.type === "generateText") {
         body.classList.add("script-node-body");
         const text = el("textarea");
@@ -869,6 +896,9 @@ export async function mountStudio(host, id) {
             }
           } catch {}
         }
+      }
+      if (localNodeNames[n.type]) {
+        const configure=button('Thiết lập',()=>{},'node-local-config');configure.setAttribute('aria-label','Thiết lập hậu kỳ');bindInlinePopup(configure,()=>configureLocalNode(n.id));card.append(configure);
       }
       if (!card.isConnected) stage.append(card);
       const more = el("details", undefined, "node-more"),
@@ -976,6 +1006,7 @@ export async function mountStudio(host, id) {
           )
         )
           return;
+        e.preventDefault();
         drag = {
           mode: "node",
           id: n.id,
@@ -1152,6 +1183,8 @@ export async function mountStudio(host, id) {
     const movingNode = drag?.mode === "node" && drag.moving;
     for (const card of stage.querySelectorAll(".cvn-node")) {
       const selected = selection.has(card.dataset.id);
+      const currentNode = controller.snapshot().nodes.find(node => node.id === card.dataset.id);
+      card.classList.toggle("cvn-stale", !!currentNode && isStale(controller.snapshot(), currentNode));
       card.classList.toggle("selected", selected);
       const composer = card.querySelector(".inline-composer");
       if (composer) {
@@ -1173,7 +1206,7 @@ export async function mountStudio(host, id) {
     }
     renderedContextKey = toolbarKey; contextCard = card;
     context.replaceChildren();
-    if (["generateText", "prompt"].includes(n.type)) {
+    if (["generateText", "prompt", "negativePrompt"].includes(n.type)) {
       context.hidden = false;
       context.classList.remove("cvn-video-toolbar");
       context.setAttribute("aria-label", "Công cụ văn bản đã chọn");
@@ -1243,7 +1276,8 @@ export async function mountStudio(host, id) {
       fullscreen.append(icon("expand"));
       fullscreen.title = "Xem video toàn màn hình";
       fullscreen.setAttribute("aria-label", "Xem video toàn màn hình");
-      context.append(capture);
+      const post = button("Hậu kỳ", async () => { const asset = await readAsset(n.data.assetId); return openPostWorkbench(asset, { onResult: asset => addAssetNode(asset) }); });
+      post.disabled = !video; context.append(post, capture);
       trailingAction = fullscreen;
     } else {
       const primary = el("div", undefined, "image-primary-tools"),
@@ -1293,7 +1327,7 @@ export async function mountStudio(host, id) {
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     });
-    download.disabled = !n.data.assetId;
+    download.disabled = !n.data.assetId || isStale(controller.snapshot(), n);
     download.setAttribute("aria-label", isVideo ? "Tải video xuống" : "Tải ảnh xuống");
     download.title = "Tải xuống";
     download.append(icon("download"));
@@ -1306,10 +1340,12 @@ export async function mountStudio(host, id) {
       throw Error("Dự án có xung đột. Hãy sao lưu trước khi tải lại.");
     controller.execute({ type: "updateNode", id, patch });
     clearTimeout(inlineSave);
-    inlineSave = setTimeout(() => void persist(), 180);
+    if (Object.keys(patch).every(key => ["studioPrompt", "text"].includes(key))) inlineSave = setTimeout(() => void persist(), 180);
+    else void persist();
   }
   function openEditor(id) {
     const card = stage.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (card?.querySelector('[aria-label="Thiết lập hậu kỳ"]')) { card.querySelector('[aria-label="Thiết lập hậu kỳ"]').click(); return; }
     card?.querySelector('textarea,[contenteditable="true"]')?.focus({ preventScroll: true });
   }
   function makeComposer(n) {
@@ -2288,6 +2324,61 @@ export async function mountStudio(host, id) {
       },
     });
   }
+  async function executeGraph(graph, provider='local', tab=null, seedAccepted=true) {
+    if(activeJobs.has('__all__'))throw Error('Luồng đang chạy. Đợi hoặc dừng lượt hiện tại.');
+    const job=await createJob({projectId:id,graph,provider,tabId:tab?.id||null,chatURL:tab?.url||null,title:project.name,kind:'workflow',seedAccepted});
+    activeJobs.set('__all__',job.id);status.textContent='Đang chạy luồng…';
+    try{const result=await startJob(job.id,update=>{status.textContent=update.localProgress||update.status;});notice(result.status==='success'?'Đã hoàn tất luồng':result.error||result.status);return result;}
+    finally{activeJobs.delete('__all__');renderContext();}
+  }
+  async function showRunGraph() {
+    resourcePanel('Chạy toàn bộ luồng');
+    const graph=controller.snapshot(), generators=graph.nodes.filter(node=>node.type.startsWith('generate')), provider=el('select'),tabs=el('select'),reuse=el('input'),reuseLabel=el('label');
+    reuse.type='checkbox';reuse.checked=true;reuseLabel.append(reuse,el('span','Chỉ chạy phần thiếu / kết quả đã cũ'));
+    provider.setAttribute('aria-label','AI chạy toàn bộ luồng');tabs.setAttribute('aria-label','Tab chạy toàn bộ luồng');
+    provider.add(new Option(generators.length?'Chọn AI…':'Xử lý local · không gửi AI',generators.length?'':'local'));
+    if(generators.length){const kind=generators.some(node=>node.type==='generateVideo')?'video':generators.some(node=>node.type==='generateImage')?'image':'text';for(const item of await connectedAI(kind))if(generators.every(node=>item.types.includes(node.type==='generateText'?'text':node.type==='generateVideo'?'video':'image')))provider.add(new Option(item.name,item.id));}
+    provider.onchange=async()=>{tabs.replaceChildren(new Option('Chọn đúng tab chạy cả luồng',''));if(!['local','google','openai',''].includes(provider.value))for(const tab of await api('tabs?provider='+provider.value)){const option=new Option(tab.title||tab.url,tab.id);option.dataset.url=tab.url;tabs.add(option);}};
+    editor.append(provider,tabs,reuseLabel,button('Chạy luồng đã chốt',async()=>{if(!provider.value)throw Error('Chọn AI đang kết nối.');const tab=tabs.value?{id:Number(tabs.value),url:tabs.selectedOptions[0].dataset.url}:null;if(!['local','google','openai'].includes(provider.value)&&!tab)throw Error('Chọn tab chạy toàn bộ luồng.');editor.close();await executeGraph(controller.snapshot(),provider.value,tab,reuse.checked);}),button('Dừng luồng',async()=>{const jobId=activeJobs.get('__all__');if(jobId)await stopJob(jobId);}));
+  }
+  async function showProjectRuns() {
+    resourcePanel('Lượt chạy của Canvas');
+    for(const job of (await list('jobs')).filter(job=>job.projectId===id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))){
+      const row=el('section');row.append(el('strong',job.title+' · '+job.status),el('small','Task ID: '+job.id),el('p',job.error||''));
+      if(job.status==='unknown')row.append(button('Kiểm tra kết quả',async()=>{await inspectJob(job.id);await showProjectRuns();}));
+      if(['error','review','stopped'].includes(job.status)){
+        const output=job.outputs[job.activeNode],text=el('textarea');if(output?.accepted===false){text.value=output.text;text.setAttribute('aria-label','Sửa JSON kịch bản');row.append(text);}
+        row.append(button('Tiếp tục phần còn thiếu',async()=>{await resumeJob(job.id,output?.accepted===false?text.value:null);editor.close();await startJob(job.id);await showProjectRuns();}));
+      }
+      editor.append(row);
+    }
+  }
+  function configureLocalNode(nodeId) {
+    const node=controller.snapshot().nodes.find(node=>node.id===nodeId);if(!node)return;
+    resourcePanel(localNodeNames[node.type]);
+    const form=el('form',undefined,'local-node-settings'),settings=node.data.localSettings?JSON.parse(node.data.localSettings):{},fields={};
+    const specs={videoTrim:[['trimStart','Bắt đầu (giây)',0],['trimEnd','Kết thúc · 0 đến hết',0]],videoRotate:[['rotation','Góc 0/90/180/270',0],['flipHorizontal','Lật ngang',false]],videoColor:[['brightness','Độ sáng −0,5…0,5',0],['contrast','Tương phản 0,1…3',1],['saturation','Bão hòa 0…3',1]],frameFit:[['size','Tỷ lệ đích','16:9']],audioMix:[['musicVolume','Âm lượng nhạc 0…2',.5],['originalVolume','Âm lượng gốc 0…2',1],['muteOriginal','Tắt âm gốc',false],['loop','Lặp nhạc',true]],subtitles:[['fontSize','Cỡ chữ 10…80',24]],voiceSync:[['fit','freeze hoặc stretch','freeze'],['lines','Mỗi dòng ứng với một cảnh','']],transition:[['transition','fade/dissolve/wipeleft/slideright','fade'],['duration','Đoạn chồng (giây)',.3]],speed:[['speed','Tốc độ 0,25…4',1]],watermark:[['logoWidth','Rộng logo (%)',16],['opacity','Độ rõ logo',.8],['margin','Lề',20],['position','bottomRight/bottomLeft/topRight/topLeft','bottomRight']],voiceover:[['voice','Giọng OpenAI','coral'],['speed','Tốc độ giọng',1]]};
+    for(const [key,label,value]of specs[node.type]||[]){const wrap=el('label'),control=el(key==='lines'?'textarea':'input');if(key!=='lines')control.type=typeof value==='boolean'?'checkbox':typeof value==='number'?'number':'text';if(control.type==='number')control.step='any';if(control.type==='checkbox')control.checked=settings[key]??value;else control.value=settings[key]??value;control.setAttribute('aria-label',label);wrap.append(el('span',label),control);form.append(wrap);fields[key]=control;}
+    const captions=el('textarea');if(node.type==='subtitles'){captions.value=node.data.captions||'';captions.setAttribute('aria-label','SRT của node');form.append(captions);}
+    const text=el('textarea');if(node.type==='voiceover'){text.value=node.data.text||'';text.maxLength=4096;text.setAttribute('aria-label','Lời đọc khi không nối Text');form.append(text);}
+    const order=el('div');
+    function updateOrder(){order.replaceChildren();const graph=controller.snapshot(),incoming=graph.edges.filter(edge=>edge.target===nodeId&&['video','videos','audio'].includes(edge.targetPort));for(const [index,edge]of incoming.entries()){const row=el('div'),siblings=incoming.filter(item=>item.targetPort===edge.targetPort);row.append(el('span',graph.nodes.find(item=>item.id===edge.source)?.data.customName||edge.source));for(const [label,delta]of [['↑',-1],['↓',1]])row.append(button(label,()=>{const ids=siblings.map(item=>item.id),from=ids.indexOf(edge.id),to=from+delta;if(to<0||to>=ids.length)return;[ids[from],ids[to]]=[ids[to],ids[from]];command({type:'reorderInputs',target:nodeId,port:edge.targetPort,edgeIds:ids});updateOrder();}));order.append(row);}}
+    updateOrder();form.append(order,el('p','Chỉ lấy nguồn đã nối đúng cổng. Kết quả mới được lưu riêng, giữ nguyên nguồn.'));
+    if(['voiceover','transcribe'].includes(node.type))form.append(el('p','Lượt này gửi văn bản hoặc media đến OpenAI API, có thể tính phí.'));
+    const run=el('button','Lưu thông số & chạy node');run.type='submit';form.append(run);form.onsubmit=async event=>{event.preventDefault();run.disabled=true;try{
+      const values=Object.fromEntries(Object.entries(fields).map(([key,control])=>[key,control.type==='checkbox'?control.checked:control.type==='number'?Number(control.value):control.value]));
+      command({type:'updateNode',id:nodeId,patch:{localSettings:JSON.stringify(values),...(node.type==='subtitles'?{captions:captions.value}:{}),...(node.type==='voiceover'?{text:text.value}:{})}});
+      const graph=controller.snapshot(),required=new Set([nodeId]);let changed=true;while(changed){changed=false;for(const edge of graph.edges)if(required.has(edge.target)&&!required.has(edge.source)){required.add(edge.source);changed=true;}}
+      graph.nodes=graph.nodes.filter(item=>required.has(item.id));graph.edges=graph.edges.filter(edge=>required.has(edge.source)&&required.has(edge.target));graph.groups=[];
+      if(graph.nodes.some(item=>item.type.startsWith('generate')&&!item.data.assetId&&!item.data.text))throw Error('Tạo/xác nhận kết quả AI ở bước nguồn trước hoặc dùng Chạy toàn bộ luồng.');
+      const target=graph.nodes.find(item=>item.id===nodeId);delete target.data.assetId;delete target.data.outputKey;
+      const readyNodes=graph.nodes.filter(item=>item.type.startsWith('generate'));
+      if(readyNodes.some(item=>isStale(graph,item)))throw Error('Nguồn AI đã cũ; chạy lại nguồn trước.');
+      editor.close();await executeGraph(graph,'local',null,true);
+    }catch(error){notice(error.message);}finally{run.disabled=false;}};
+    editor.append(form);
+  }
+
   function templateGraph() {
     const graph = controller.snapshot();
     for (const n of graph.nodes)
@@ -2401,6 +2492,7 @@ export async function mountStudio(host, id) {
     canvasNavigation?.refresh();
   }
   async function downloadNode(node) {
+    if (isStale(controller.snapshot(), node)) throw Error("Thông số hoặc nguồn đã đổi. Chạy lại để tải kết quả hiện hành; tệp cũ vẫn trong Kho.");
     const asset = node.data.assetId && await readAsset(node.data.assetId);
     const isText = ["prompt", "generateText"].includes(node.type);
     const blob = asset?.blob || new Blob([isText ? node.data.text || "" : JSON.stringify({ format: "mooz-cvn-node", node }, null, 2)], { type: isText ? "text/plain;charset=utf-8" : "application/json" });
@@ -2490,9 +2582,9 @@ export async function mountStudio(host, id) {
         { label: "Xóa", shortcut: "Delete", danger: true, action: () => command({ type: "deleteNode", id: node.id }) },
       );
     } else items.push(
-      { label: "Tải lên", action: () => { files.accept = "image/*,video/*"; files.click(); } },
+      { label: "Tải lên", action: () => { files.accept = "image/*,video/*,audio/*"; files.click(); } },
       { label: "Lưu vào Kho tài sản", disabled: true, title: "Chọn một node có ảnh hoặc video trước." },
-      { label: "Thêm node", children: [["prompt", "Văn bản"], ["generateText", "Kịch bản"], ["generateImage", "Ảnh"], ["generateVideo", "Video"]].map(([type, label]) => ({ label, action: () => addNode(type, null, point) })) },
+      { label: "Thêm node", children: [["prompt", "Văn bản"], ["generateText", "Kịch bản"], ["generateImage", "Ảnh"], ["generateVideo", "Video"], ["audioInput", "Âm thanh"], ...Object.entries(localNodeNames).map(([type,label])=>[type,label])].map(([type, label]) => ({ label, action: () => addNode(type, null, point) })) },
       { separator: true },
       { label: "Hoàn tác", shortcut: "Ctrl/Cmd Z", disabled: !controller.canUndo, action: () => historyStep(false) },
       { label: "Làm lại", shortcut: "Ctrl/Cmd Shift Z", disabled: !controller.canRedo, action: () => historyStep(true) },
@@ -2545,6 +2637,7 @@ export async function mountStudio(host, id) {
 
   function finishPan() {
     if (drag?.mode !== "pan") return;
+    if (drag.middle) suppressMiddlePasteUntil = Date.now() + 250;
     drag = null;
     shell.classList.remove("middle-panning");
     setPointerMode(panMode);
@@ -2563,6 +2656,7 @@ export async function mountStudio(host, id) {
   }
   function startMiddlePan(event) {
     event.preventDefault(); event.stopPropagation();
+    suppressMiddlePasteUntil = Date.now() + 1000;
     if (drag?.mode === "pan" && drag.middle) return;
     finishSelection(true);
     if (drag?.mode === "node") { drag = null; refreshNodePositions(); }
@@ -2578,6 +2672,8 @@ export async function mountStudio(host, id) {
   }
   // Pointer events omit a second button press while another mouse button is down.
   // Keep native mouse events too, and capture above controls/media in the Canvas shell.
+  window.addEventListener('paste', event => { if (Date.now() < suppressMiddlePasteUntil) { event.preventDefault(); event.stopImmediatePropagation(); } }, { capture:true, signal:abort.signal });
+  window.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') suppressMiddlePasteUntil = 0; }, { capture:true, signal:abort.signal });
   shell.addEventListener("pointerdown", event => {
     if (event.button === 1) startMiddlePan(event);
   }, { capture: true, signal: abort.signal });
@@ -2767,7 +2863,9 @@ export async function mountStudio(host, id) {
     },
     { signal: abort.signal },
   );
+  window.addEventListener('mooz-job-update', event => applyJobOutput(event.detail), { signal: abort.signal });
   render();
+  if (recoveredOutputs) await persist();
   const tabStatusTimer = setInterval(() => {
     void list("jobs").then(jobs => {
       if (disposed) return;

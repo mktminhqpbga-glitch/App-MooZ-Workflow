@@ -14,6 +14,7 @@ import {
   remove,
   addAsset,
   readAsset,
+  listAssets,
 } from "./core/storage.js";
 import { ProjectRepository } from "./core/projects.js";
 import {
@@ -23,6 +24,11 @@ import {
   inspectJob,
   recoverJobs,
 } from "./core/runner.js";
+import { prepareJobs } from "./core/queue-storage.js";
+import { splitPrompts, uniqueTags, validateImage, limits } from "./core/queue-plan.js";
+import { buildFlow, buildContinuation } from "./core/flow-plan.js";
+import { queueRunner } from "./core/queue-runner.js";
+import { resumeJob } from "./core/runner.js";
 import { emptyGraph } from "./core/graph.js";
 const repo = new ProjectRepository(),
   titles = {
@@ -297,6 +303,17 @@ export async function mountSettings(host) {
   preferences.append(el("h2", "Không gian và giao diện"), identity, appearanceLink);
   host.append(preferences);
   mountAssistantSettings(host);
+  const downloads = el('section', undefined, 'settings-panel app-downloads');
+  downloads.append(el('h2','Ứng dụng & extension'));
+  const installed = el('p', globalThis.moozDesktop ? 'MooZ CVN ' + globalThis.moozDesktop.version + ' · ' + globalThis.moozDesktop.platform + ' ' + globalThis.moozDesktop.arch : 'Bạn đang dùng bản web. Bản desktop có máy chủ kết nối AI local.');
+  const extension = el('a','Tải MooZ Connect mới nhất'), mac = el('a','Tải ứng dụng macOS Intel'), releaseState = el('p','Đang kiểm tra phiên bản phát hành…');
+  extension.href='/downloads/MooZ-Connect.zip'; extension.download='MooZ-Connect.zip';
+  mac.href='https://github.com/mktminhqpbga-glitch/App-MooZ-Workflow/releases/latest'; mac.target='_blank'; mac.rel='noopener';
+  downloads.append(installed,extension,mac,releaseState,el('p','Mac Intel (x64). Bản chưa ký/notarize cần được xác nhận mở trong macOS. Extension: giải nén → Chrome → Extensions → Developer mode → Load unpacked.'));
+  host.append(downloads);
+  void fetch('/downloads/release.json').then(response=>{if(!response.ok)throw Error('Không đọc được phiên bản');return response.json();}).then(info=>{extension.textContent='Tải MooZ Connect '+info.extensionVersion;releaseState.textContent='Mã nguồn app '+info.appVersion+' · bản Mac công khai xem trên trang phát hành.';}).catch(()=>{releaseState.textContent='Mở trang phát hành để xem gói Mac hiện có.';});
+  void fetch('https://api.github.com/repos/mktminhqpbga-glitch/App-MooZ-Workflow/releases/latest').then(response=>{if(!response.ok)throw Error('Chưa có release');return response.json();}).then(release=>{const asset=release.assets?.find(asset=>asset.name==='MooZ-CVN-macOS-Intel.zip');if(asset&&asset.browser_download_url.startsWith('https://github.com/')){mac.href=asset.browser_download_url;mac.textContent='Tải macOS Intel · '+release.tag_name;releaseState.textContent='Bản phát hành: '+release.tag_name;}}).catch(()=>{});
+
   const panel = el("section", undefined, "settings-panel"),
     status = el("p", "Đang kiểm tra máy chủ…"),
     code = el("textarea");
@@ -440,10 +457,10 @@ const labels = {
   error: "Chưa hoàn tất",
   unknown: "Cần đối chiếu",
   stopped: "Đã dừng",
-  review: "Đã thu hồi kết quả",
+  review: "Đã đối chiếu · chưa chạy tiếp",
 };
 export async function mountBatch(host, kind) {
-  let alive = true;
+  let alive = true, flowMode = "normal";
   const abort = new AbortController();
   host.replaceChildren(
     el("h1", kind === "image" ? "Tạo ảnh hàng loạt" : "Tạo video hàng loạt"),
@@ -454,6 +471,7 @@ export async function mountBatch(host, kind) {
     ),
   );
   host.classList.add("batch-page");
+  document.body.classList.add("batch-route");
   const workspace = el("div", undefined, "batch-workspace"),
     queuePanel = el("section", undefined, "batch-queue settings-panel"),
     queueStats = el("p", undefined, "batch-queue-stats"),
@@ -464,16 +482,16 @@ export async function mountBatch(host, kind) {
   const aiSettings = el("a", "Tab AI"); aiSettings.href = "#settings";
   groupHeader.append(icon("connections"), connectionStatus, aiSettings);
   const updateConnectionStatus = (running = null) => {
-    const ready = new Set([...workspace.querySelectorAll('[aria-label="Tab hàng loạt"] option')].filter(option => option.value).map(option => option.value));
+    const ready = new Set([...workspace.querySelectorAll('[aria-label="Tab hàng loạt"] option')].filter(option => option.value && option.value !== 'auto').map(option => option.value));
     if (running !== null) connectionStatus.dataset.running = running;
-    connectionStatus.textContent = `${ready.size ? ready.size + " tab AI sẵn sàng" : "Chưa có tab AI sẵn sàng"} · ${connectionStatus.dataset.running || 0} đang xử lý · 2 khu làm việc`;
+    connectionStatus.textContent = `${ready.size ? ready.size + " tab AI sẵn sàng" : "Chưa có tab AI sẵn sàng"} · ${connectionStatus.dataset.running || 0} đang xử lý · 1 luồng làm việc`;
   };
   updateConnectionStatus();
   for (const [label, glyph, action] of [
     ["Văn bản", "text", () => { workspace.classList.add("batch-text-mode"); for (const form of workspace.querySelectorAll('form')) form.querySelector('.batch-image-picker > button[aria-label="Bỏ ảnh đầu vào"]')?.click(); }],
-    ["Ảnh sản phẩm", "image", () => workspace.classList.remove("batch-text-mode")],
+    ["Ảnh sản phẩm", "image", () => { flowMode="normal"; workspace.classList.remove("batch-text-mode"); workspace.classList.remove("batch-extension-mode"); }],
     ["Đầu → Cuối", "frame", null],
-    ["Nối dài", "video", null],
+    ["Nối dài", "video", kind === "video" ? () => { flowMode="extend"; workspace.classList.add("batch-extension-mode"); } : null],
     ["Luồng đã lưu", "folder", () => { workspace.querySelector('[aria-label="Luồng mẫu"]')?.focus(); }],
     ["Luồng xử lý", "sliders", () => { queuePanel.scrollIntoView({ behavior: "smooth", block: "nearest" }); }],
     ["Kho media", "folder", () => { workspace.classList.remove("batch-text-mode"); workspace.querySelector('[aria-label="Chọn ảnh đầu vào"]')?.click(); }],
@@ -492,16 +510,23 @@ export async function mountBatch(host, kind) {
   const assets = (await Promise.all([list("inputs"), list("results")])).flat().filter(a => a.kind === "image"),
     templates = await list("templates");
   const assetURLs = new Map(assets.map(asset => [asset.id, URL.createObjectURL(asset.blob)]));
-  const availableProviders = await connectedAI(kind).catch(() => []);
+  let availableProviders = await connectedAI(kind).catch(() => []);
+  const queueControls = el('div', undefined, 'batch-queue-controls'), concurrency = el('select'), queueState = el('small');
+  concurrency.setAttribute('aria-label', 'Số tác vụ song song');
+  for (let count=1; count<=6; count++) concurrency.add(new Option(count + ' tác vụ song song', count));
+  queueControls.append(concurrency, button('Chạy hàng đợi', async () => { await queueRunner.start(Number(concurrency.value)); await render(); }), button('Tạm dừng cấp việc', () => { queueRunner.pause(); void render(); }), queueState);
+  queuePanel.insertBefore(queueControls, history);
+  let queueUnsubscribe = () => {};
+
   host.append(groupHeader, groups, workspace);
   async function createLane(lane) {
     const form = el("form", undefined, "batch-form settings-panel"),
       prompts = el("textarea");
-    form.setAttribute("aria-label", "Khu làm việc " + lane);
-    prompts.placeholder = "Mỗi dòng là một yêu cầu riêng…";
+    form.setAttribute("aria-label", "Luồng làm việc");
+    prompts.placeholder = "[Yêu cầu thứ nhất, có thể nhiều dòng…]\n[Yêu cầu thứ hai với @tag ảnh…]";
     prompts.setAttribute("aria-label", "Prompt hàng loạt");
     prompts.required = true;
-    prompts.maxLength = 50000;
+    prompts.maxLength = 1000000;
     const provider = el("select"),
       tabs = el("select"),
       ratio = el("select"),
@@ -543,6 +568,48 @@ export async function mountBatch(host, kind) {
     }
     if (!assets.length) imageChoices.append(el("p", "Kho chưa có ảnh. Tải ảnh lên Kho để chọn."));
     imagePicker.append(chooseImage, clearImage, imageChoices);
+    const characterIds = new Set(), characterPicker = el('div', undefined, 'batch-character-picker'), characterChoices = el('div', undefined, 'batch-image-choices'), characterPreview = el('div', undefined, 'batch-character-preview');
+    characterChoices.hidden = true; characterChoices.setAttribute('aria-label', 'Kho ảnh nhân vật');
+    const characterToggle = button('Chọn ảnh nhân vật (tùy chọn)', () => { characterChoices.hidden = !characterChoices.hidden; });
+    characterToggle.setAttribute('aria-label', 'Chọn ảnh nhân vật tham chiếu');
+    for (const asset of assets) {
+      const choice = button('', () => {
+        validateImage(asset);
+        if (characterIds.has(asset.id)) characterIds.delete(asset.id); else characterIds.add(asset.id);
+        choice.setAttribute('aria-pressed', String(characterIds.has(asset.id)));
+        characterPreview.replaceChildren();
+        for (const id of characterIds) { const img = el('img'); img.src = assetURLs.get(id); img.alt = assets.find(item => item.id === id)?.name || 'Nhân vật'; characterPreview.append(img); }
+      }), preview = el('img'); preview.src = assetURLs.get(asset.id); preview.alt = asset.name;
+      choice.append(preview); choice.setAttribute('aria-label', 'Nhân vật ' + asset.name); choice.setAttribute('aria-pressed','false'); characterChoices.append(choice);
+    }
+    characterPicker.append(characterToggle, characterPreview, characterChoices);
+    const splitMode = el('select'), negative = el('textarea'), sceneCount = el('select'), makeImages = el('input');
+    splitMode.setAttribute('aria-label','Cách tách prompt');
+    for (const [value,label] of [['blocks','Khối [ ... ] · nhiều dòng'],['lines','Mỗi dòng một yêu cầu'],['paragraphs','Mỗi đoạn cách dòng trống'],['whole','Gộp toàn văn thành một yêu cầu']]) splitMode.add(new Option(label,value));
+    negative.placeholder = 'Negative prompt chung (tùy chọn)…'; negative.maxLength = 20000; negative.setAttribute('aria-label','Negative prompt chung'); negative.className = 'batch-negative';
+    sceneCount.setAttribute('aria-label','Số cảnh'); for (let count=1; count<=12; count++) sceneCount.add(new Option(count + ' cảnh',count));
+    makeImages.type = 'checkbox'; makeImages.setAttribute('aria-label','Tạo ảnh trước video');
+
+    const tagManager=el('details',undefined,'batch-tag-manager'), tagTitle=el('summary','Kho ảnh & @tag · đổi tag / tải ảnh'), tagRows=el('div'), uploadImages=el('input');
+    uploadImages.type='file';uploadImages.accept='image/png,image/jpeg,image/webp';uploadImages.multiple=true;uploadImages.setAttribute('aria-label','Tải ảnh tham chiếu vào Kho');
+    tagManager.append(tagTitle,el('p','PNG/JPG/WebP ≤8 MB/ảnh; tối đa 8 ảnh/job, 32 MB snapshot. Ảnh nhân vật là tùy chọn.'),uploadImages,tagRows);
+    function renderTagRows(){
+      tagRows.replaceChildren();const tags=uniqueTags(assets);
+      for(const asset of assets){const row=el('label'),image=el('img'),input=el('input');image.src=assetURLs.get(asset.id);image.alt=asset.name;input.value=tags.get(asset.id);input.setAttribute('aria-label','Tag ảnh '+asset.name);
+        input.onchange=async()=>{const previous=asset.batchTag;const next=input.value.replace(/^@/,'').trim().toLowerCase();try{if(!/^[a-z0-9_-]{1,48}$/.test(next))throw Error('Tag cần 1–48 chữ thường, số, - hoặc _.');if([...uniqueTags(assets)].some(([id,tag])=>id!==asset.id&&tag===next))throw Error('Tag đã tồn tại.');asset.batchTag=next;await write(asset.source==='upload'?'inputs':'results',asset);notice('Đã đổi @'+next+'; job đã chốt vẫn giữ ảnh cũ.');}catch(error){asset.batchTag=previous;notice(error.message);input.value=tags.get(asset.id);}};
+        row.append(image,el('span','@'),input);tagRows.append(row);
+      }
+    }
+    uploadImages.onchange=async()=>{try{
+      const files=[...uploadImages.files];for(const file of files)validateImage({id:'upload',blob:file});
+      if(files.reduce((sum,file)=>sum+file.size,0)+assets.filter(asset=>asset.batchTag).reduce((sum,asset)=>sum+asset.blob.size,0)>limits.snapshotBytes)throw Error('Kho tham chiếu vượt 32 MB.');
+      for(const file of files){const bitmap=await createImageBitmap(file);bitmap.close();}
+      for(const file of files){const asset=await addAsset(file);assets.push(asset);asset.batchTag=uniqueTags(assets).get(asset.id);await write('inputs',asset);assetURLs.set(asset.id,URL.createObjectURL(asset.blob));
+        const product=button('',()=>selectImage(asset)),image=el('img');image.src=assetURLs.get(asset.id);image.alt=asset.name;product.dataset.assetId=asset.id;product.setAttribute('aria-label','Chọn ảnh '+asset.name);product.append(image);imageChoices.append(product);
+        const person=button('',()=>{if(characterIds.has(asset.id))characterIds.delete(asset.id);else characterIds.add(asset.id);person.setAttribute('aria-pressed',String(characterIds.has(asset.id)));characterPreview.replaceChildren();for(const id of characterIds){const img=el('img');img.src=assetURLs.get(id);img.alt=assets.find(item=>item.id===id)?.name||'Nhân vật';characterPreview.append(img);}}),portrait=el('img');portrait.src=assetURLs.get(asset.id);portrait.alt=asset.name;person.append(portrait);person.setAttribute('aria-label','Nhân vật '+asset.name);characterChoices.append(person);
+      }renderTagRows();uploadImages.value='';
+    }catch(error){notice(error.message);}};
+    renderTagRows();
     template.add(new Option("Luồng một bước", ""));
     template.setAttribute("aria-label", "Luồng mẫu");
     for (const t of templates) template.add(new Option(t.name, t.id));
@@ -552,6 +619,9 @@ export async function mountBatch(host, kind) {
     for (const r of ["1:1", "1:2", "2:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21"]) ratio.add(new Option(r, r));
     ratio.value = "16:9"; ratio.hidden = true;
     ratio.setAttribute("aria-label", "Tỷ lệ khung");
+    const extensionField=el('section',undefined,'batch-extension-field'), extensionVideo=el('select'),targetDuration=el('input');extensionVideo.setAttribute('aria-label','Video cần nối dài');targetDuration.type='number';targetDuration.value=30;targetDuration.min=.1;targetDuration.step=.1;targetDuration.setAttribute('aria-label','Thời lượng mục tiêu');
+    extensionVideo.add(new Option('Chọn video nguồn…',''));for(const asset of await listAssets())if(asset.kind==='video')extensionVideo.add(new Option(asset.name,asset.id));
+    extensionField.append(el('label','Video nguồn'),extensionVideo,el('label','Thời lượng mục tiêu (giây)'),targetDuration,el('p','Dùng frame cuối thật làm ảnh tham chiếu cho đoạn tiếp theo, rồi ghép. Nếu clip AI trả về quá ngắn, dừng và giữ các đoạn đã lưu.'));
     const generation = { quality: "medium", resolution: kind === "video" ? "720P" : "1K", background: "auto", count: 1 },
       generationMenu = el("details", undefined, "batch-generation-settings"),
       generationSummary = el("summary"), generationPanel = el("div", undefined, "generation-options-panel"),
@@ -600,6 +670,7 @@ export async function mountBatch(host, kind) {
     }, { capture: true, signal: abort.signal });
     const duration = el("select");
     duration.setAttribute("aria-label", "Thời lượng video");
+    duration.add(new Option("Không chọn thời lượng", ""));
     for (const d of [5, 10, 15, 30, 40]) duration.add(new Option(d + " giây", d));
     duration.hidden = kind !== "video";
     let refreshRevision = 0, tabProvider = "";
@@ -619,6 +690,7 @@ export async function mountBatch(host, kind) {
         const found = await api("tabs?provider=" + selectedProvider);
         if (!alive || revision !== refreshRevision) return;
         tabs.replaceChildren(new Option(found.length ? "Chọn tab chạy tác vụ…" : "Chưa có tab kết nối", ""));
+        if (found.length) tabs.add(new Option("Tự chọn tab phù hợp khi bắt đầu", "auto"));
         for (const t of found) {
           const o = new Option(t.title || t.url, t.id);
           o.dataset.url = t.url;
@@ -632,147 +704,104 @@ export async function mountBatch(host, kind) {
       } finally { if (revision === refreshRevision && alive) { tabs.disabled = false; updateConnectionStatus(); } }
     }
     provider.onchange = () => void refresh();
-    const submit = el("button", "Xếp tác vụ vào hàng đợi");
+    const submit = el("button", "Thêm & tạo node");
     submit.type = "submit";
     form.append(
-      el("h2", "Khu làm việc " + lane),
+      el("h2", "Luồng làm việc"),
       prompts,
       source,
       template,
       provider,
       tabs,
-      button("Cập nhật tab", refresh),
+      button("Cập nhật tab", async () => {
+        const selected = provider.value;
+        availableProviders = await connectedAI(kind, { force: true });
+        provider.replaceChildren(new Option(availableProviders.length ? 'Chọn AI…' : 'Chưa có AI kết nối',''));
+        for (const item of availableProviders) provider.add(new Option(item.name,item.id));
+        provider.value = availableProviders.some(item=>item.id===selected) ? selected : '';
+        await refresh();
+      }),
       ratio,
       duration,
+      splitMode,
+      sceneCount,
+      makeImages,
+      characterPicker,
+      extensionField,
+      tagManager,
+      negative,
       submit,
     );
     const promptCount = el("small", "0 yêu cầu", "batch-prompt-count");
-    prompts.addEventListener("input", () => {
-      promptCount.textContent = prompts.value.split("\n").filter(line => line.trim()).length + " yêu cầu · tối đa 50";
-    });
+    const updatePromptCount = () => {
+      try { const count = splitPrompts(prompts.value, splitMode.value).length; promptCount.textContent = count + ' prompt × ' + (kind === 'image' ? generation.count : 1) + ' = ' + count * (kind === 'image' ? generation.count : 1) + ' job · chưa gửi AI'; }
+      catch (error) { promptCount.textContent = prompts.value.trim() ? error.message : '0 yêu cầu'; }
+    };
+    prompts.addEventListener('input',updatePromptCount); splitMode.onchange = updatePromptCount;
     form.insertBefore(promptCount, source);
-    for (const [control, label] of [[source, "Ảnh đầu vào"], [template, "Luồng mẫu"], [provider, "AI thực hiện"], [tabs, "Tab chạy tác vụ"], [ratio, "Tỷ lệ khung"], [duration, "Thời lượng"]]) {
+    for (const [control, label] of [[source, "Ảnh sản phẩm (tùy chọn)"], [template, "Luồng mẫu"], [provider, "AI thực hiện"], [tabs, "Tab chạy tác vụ"], [ratio, "Thông số đầu ra"], [duration, "Thời lượng mỗi cảnh"], [splitMode,"Cách tách yêu cầu"], [sceneCount,"Kịch bản nhiều cảnh"], [makeImages,"Tạo ảnh trước khi tạo video"]]) {
       const field = el("label", undefined, "batch-field");
       control.before(field); field.append(el("span", label), control);
       if (control === source) field.append(imagePicker);
       if (control === ratio) field.append(generationMenu);
       if (control === source) field.classList.add("batch-source-field");
-      field.hidden = control === duration && kind !== "video";
+      field.hidden = [duration, sceneCount, makeImages].includes(control) && kind !== "video";
     }
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      submit.disabled = true;
-      const created = [], originalPrompt = prompts.value;
-      const selected = { source: source.value, template: template.value, provider: provider.value, tabId: tabs.value ? Number(tabs.value) : null, chatURL: tabs.selectedOptions[0]?.dataset.url || null, ratio: ratio.value, duration: Number(duration.value), generation: { ...generation } };
+    form.onsubmit = async event => {
+      event.preventDefault(); submit.disabled = true;
+      const selected = { modeType:flowMode, extensionVideo:extensionVideo.value, targetDuration:Number(targetDuration.value), text: prompts.value, mode: splitMode.value, copies: kind === 'image' ? generation.count : 1, assets: [...assets], sourceId: source.value, characterIds: [...characterIds], provider: provider.value, tabId: tabs.value && tabs.value !== 'auto' ? Number(tabs.value) : null, autoTab: tabs.value === 'auto', chatURL: tabs.selectedOptions[0]?.dataset.url || null, kind, ratio: ratio.value, duration: duration.value === '' ? null : Number(duration.value), generation: { ...generation }, scenes: Number(sceneCount.value), createImages: makeImages.checked, negative: negative.value, template: template.value };
       try {
-        const lines = originalPrompt
-          .split("\n")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (!lines.length || lines.length > 50)
-          throw Error("Nhập từ 1 đến 50 dòng prompt.");
-        if (!selected.provider) throw Error("Chọn AI đang kết nối trước khi xếp tác vụ.");
-        if (!["google", "openai"].includes(selected.provider) && (!selected.tabId || !selected.chatURL))
-          throw Error("Chọn tab đang kết nối trước khi xếp tác vụ.");
-        const snapshot = selected.template ? templates.find(t => t.id === selected.template)?.graph : null;
-        if (selected.template && !snapshot) throw Error("Không tìm thấy luồng mẫu.");
-        for (const text of lines.flatMap(text => Array.from({ length: kind === "image" ? selected.generation.count : 1 }, () => text))) {
-          let graph = snapshot ? structuredClone(snapshot) : emptyGraph();
-          if (!snapshot)
-            graph.nodes.push({
-              id: crypto.randomUUID(),
-              type: kind === "image" ? "generateImage" : "generateVideo",
-              x: 450,
-              y: 100,
-              data: {
-                studioPrompt: text,
-                size: selected.ratio,
-                duration: selected.duration,
-                quality: selected.generation.quality, resolution: selected.generation.resolution, background: selected.generation.background,
-              },
-            });
-          else {
-            const generator = graph.nodes.find((n) =>
-              n.type.startsWith("generate"),
-            );
-            if (!generator) throw Error("Mẫu chưa có bước AI.");
-            generator.data.studioPrompt = text;
-            for (const n of graph.nodes.filter((n) =>
-              n.type.startsWith("generate"),
-            )) {
-              delete n.data.assetId;
-              delete n.data.resultAssets;
-              if (["generateImage", "generateVideo"].includes(n.type)) n.data.size = selected.ratio;
-              if (["generateImage", "generateVideo"].includes(n.type)) Object.assign(n.data, { quality: selected.generation.quality, resolution: selected.generation.resolution, background: selected.generation.background });
-              if (n.type === "generateVideo") n.data.duration = selected.duration;
-            }
+        if (!selected.provider) throw Error('Chọn AI đang kết nối trước khi chuẩn bị.');
+        if (!['openai','google'].includes(selected.provider) && !tabs.value) throw Error('Chọn tab đang kết nối trước khi xếp tác vụ.');
+        const templateGraph = selected.template ? templates.find(item => item.id === selected.template)?.graph : null;
+        if (selected.template && !templateGraph) throw Error('Không tìm thấy luồng mẫu.');
+        const jobs = await prepareJobs({ ...selected, graph: async plan => {
+          if(selected.modeType==='extend'){
+            const source=await readAsset(selected.extensionVideo);if(!source||source.kind!=='video')throw Error('Chọn video thật để nối dài.');
+            const video=document.createElement('video'),url=URL.createObjectURL(source.blob);let measured;
+            try{measured=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Không đọc được thời lượng video nguồn.')),15000);video.onloadedmetadata=()=>{clearTimeout(timer);resolve(video.duration);};video.onerror=()=>{clearTimeout(timer);reject(Error('Video nguồn không giải mã được.'));};video.src=url;});}finally{video.removeAttribute('src');video.load();URL.revokeObjectURL(url);}
+            return buildContinuation({source,sourceDuration:measured,targetDuration:selected.targetDuration,duration:selected.duration,prompt:plan.prompt,references:plan.references,size:selected.ratio,...selected.generation,negative:selected.negative});
           }
-          if (selected.source) {
-            const n = {
-                id: crypto.randomUUID(),
-                type: "imageInput",
-                x: 40,
-                y: 100,
-                data: { assetId: selected.source },
-              },
-              target = graph.nodes.find((n) => n.type.startsWith("generate"));
-            if (target.type === "generateText")
-              throw Error(
-                "Mẫu có bước đầu là văn bản, chưa hỗ trợ ảnh trực tiếp.",
-              );
-            graph.nodes.push(n);
-            graph.edges.push({
-              id: crypto.randomUUID(),
-              source: n.id,
-              sourcePort: "image",
-              target: target.id,
-              targetPort: "reference",
-            });
+          if (!templateGraph) return buildFlow({ kind, prompt: plan.prompt, references: plan.references, scenes: selected.scenes, createImages: selected.createImages, negative: selected.negative, size: selected.ratio, duration: selected.duration, ...selected.generation });
+          const graph = structuredClone(templateGraph), first = graph.nodes.find(node => node.type.startsWith('generate'));
+          if (!first) throw Error('Mẫu chưa có bước AI.');
+          first.data.studioPrompt = plan.prompt;
+          for (const node of graph.nodes) { delete node.data.assetId; delete node.data.resultAssets; if (node.type.startsWith('generate')) Object.assign(node.data, { size: selected.ratio, duration: selected.duration, negativePrompt: selected.negative, ...selected.generation }); }
+          // Restore real input IDs of the template; only generated outputs were cleared above.
+          for (const node of graph.nodes.filter(node => ['imageInput','videoInput','audioInput'].includes(node.type))) node.data.assetId = templateGraph.nodes.find(old => old.id === node.id).data.assetId;
+          for (const reference of plan.references) {
+            const source = { id: crypto.randomUUID(), type: 'imageInput', x: 0, y: graph.nodes.length * 220, data: { assetId: reference.id, customName: reference.name } }; graph.nodes.push(source);
+            graph.edges.push({ id: crypto.randomUUID(), source: source.id, target: first.id, sourcePort: 'image', targetPort: 'reference' });
           }
-          const job = await createJob({
-            projectId: null,
-            graph,
-            provider: selected.provider,
-            tabId: selected.tabId,
-            chatURL: selected.chatURL,
-            title: text.slice(0, 80),
-            kind,
-            batchLane: lane,
-          });
-          created.push(job);
-        }
-        if (prompts.value === originalPrompt) prompts.value = "";
-        prompts.dispatchEvent(new Event("input"));
-        await render();
-      } catch (e) {
-        notice(e.message);
-      } finally {
-        submit.disabled = false;
-        for (const job of created) void startJob(job.id, () => void render()).then(() => render()).catch(e => notice(e.message));
-      }
+          return graph;
+        } });
+        if (prompts.value === selected.text) prompts.value = '';
+        updatePromptCount();
+        notice('Đã chốt ' + jobs.length + ' job và node. Bấm Chạy hàng đợi để gửi AI.');
+        queueKey = ''; await render();
+      } catch (error) { notice(error.message); }
+      finally { submit.disabled = false; }
     };
     workspace.append(form);
     void refresh();
   }
   await createLane(1);
-  await createLane(2);
   workspace.append(queuePanel);
   let queueRevision = 0, queueKey = "";
   async function render() {
     const revision = ++queueRevision;
     const jobs = (await list("jobs"))
-      .filter((j) => j.projectId == null && (j.kind === kind || !j.kind))
+      .filter((j) => (j.batchLane != null || j.projectId == null) && (j.kind === kind || !j.kind))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (!alive || !history.isConnected || revision !== queueRevision) return;
-    const nextKey = JSON.stringify(jobs.map(job => [job.id, job.status, job.updatedAt, job.outputs, job.error]));
+    const nextKey = JSON.stringify([queueRunner.state().enabled, jobs.map(job => [job.id, job.status, job.updatedAt, job.outputs, job.error])]);
     if (queueKey === nextKey && history.children.length) return;
-    queueKey = nextKey;
     const waiting = jobs.filter(j => j.status === "queued").length,
       running = jobs.filter(j => ["preparing", "sent", "receiving"].includes(j.status)).length,
-      done = jobs.filter(j => ["success", "review"].includes(j.status)).length;
-    queueStats.textContent = `${waiting} chờ · ${running} đang chạy · ${done} hoàn tất`;
+      done = jobs.filter(j => j.status === "success").length;
+    queueStats.textContent = `${waiting} chờ · ${running} đang chạy · ${done} hoàn tất · ${jobs.filter(j=>j.status==="error").length} lỗi · ${jobs.filter(j=>["unknown","review"].includes(j.status)).length} cần kiểm tra`;
     updateConnectionStatus(running);
-    history.replaceChildren();
+    const rows = document.createDocumentFragment();
     for (const job of jobs) {
       const row = el("article", undefined, "queue-row");
       row.append(
@@ -780,19 +809,40 @@ export async function mountBatch(host, kind) {
         el("span", labels[job.status] || job.status, "job-state " + job.status),
       );
       row.dataset.jobId = job.id;
-      const total = job.graph.nodes.filter(n => n.type.startsWith("generate")).length,
-        completed = job.graph.nodes.filter(n => n.type.startsWith("generate") && job.outputs?.[n.id]).length;
-      row.append(el("small", `${job.batchLane ? "Khu " + job.batchLane + " · " : ""}${providerList.find(p => p.id === job.provider)?.name || job.provider}${job.tabId ? " · Tab " + job.tabId : ""} · ${completed}/${total} bước`, "batch-job-meta"));
+      row.append(el('small','Task ID: '+job.id,'batch-task-id'));
+      const snapshot=el('details',undefined,'batch-job-snapshot'), snapTitle=el('summary','Prompt và đầu vào đã chốt');
+      snapshot.append(snapTitle,el('pre',job.originalPrompt || job.graph.nodes.find(node=>node.type.startsWith('generate'))?.data.studioPrompt || ''));
+      const refs=el('div',undefined,'batch-snapshot-images');
+      for (const [assetId,input] of Object.entries(job.inputAssets||{})) if(input.kind==='image'&&input.blob){if(!assetURLs.has('snapshot-'+job.id+'-'+assetId))assetURLs.set('snapshot-'+job.id+'-'+assetId,URL.createObjectURL(input.blob));const img=el('img');img.src=assetURLs.get('snapshot-'+job.id+'-'+assetId);img.alt=input.name;refs.append(img);}
+      snapshot.append(refs);row.append(snapshot);
+      if(job.status==='queued'){const until=Math.max(0,...jobs.filter(item=>item.provider===job.provider).map(item=>item.retryAt||0));row.append(el('small',until>Date.now()?'Provider tạm giữ theo Retry-After · '+Math.ceil((until-Date.now())/1000)+' giây':queueRunner.state().enabled?'Chờ đúng tab / slot provider':'Chờ bấm Chạy hàng đợi','batch-wait-reason'));}
+      const resultGallery=el('div',undefined,'batch-result-gallery');
+      const outputIds=[...new Set([job.resultId,...Object.entries(job.outputs||{}).filter(([id])=>!['imageInput','videoInput','audioInput'].includes(job.graph.nodes.find(node=>node.id===id)?.type)).map(([,value])=>value?.assetId)].filter(Boolean))];
+      for(const assetId of outputIds){const asset=await readAsset(assetId);if(!asset?.blob)continue;if(!assetURLs.has(asset.id))assetURLs.set(asset.id,URL.createObjectURL(asset.blob));const item=el('div'),media=el(asset.kind==='image'?'img':asset.kind==='text'?'pre':asset.kind);if(asset.kind==='text')media.textContent=await asset.blob.text();else{media.src=assetURLs.get(asset.id);media.controls=asset.kind!=='image';media.alt=asset.name;}const download=el('a',assetId===job.resultId?'Tải thành phẩm':'Tải kết quả bước');download.href=assetURLs.get(asset.id);download.download=asset.name;item.append(media,download);resultGallery.append(item);}
+      row.append(resultGallery);
+
+      const processingNodes = job.graph.nodes.filter(n => !["imageInput","videoInput","audioInput","prompt","negativePrompt","preview"].includes(n.type)), total=processingNodes.length,
+        completed = processingNodes.filter(n => job.outputs?.[n.id] && job.outputs[n.id].accepted !== false).length;
+      row.append(el("small", `${job.batchLane ? "Luồng · " : ""}${providerList.find(p => p.id === job.provider)?.name || job.provider}${job.tabId ? " · Tab " + job.tabId : ""} · ${completed}/${total} bước`, "batch-job-meta"));
       const progress = el("progress");
       progress.max = total || 1; progress.value = completed;
       progress.setAttribute("aria-label", "Số bước hoàn tất");
       row.append(progress);
       if (job.error) row.append(el("p", job.error));
       const actions = el("div", undefined, "project-actions");
+      if(job.projectId){const link=el('a','Mở Canvas');link.href='#canvas/'+job.projectId;actions.append(link);}
+      if(['error','stopped','review'].includes(job.status))actions.append(button('Tiếp tục bước còn thiếu',async()=>{
+        const output=job.outputs?.[job.activeNode];
+        const corrected=output?.accepted===false?prompt('Sửa JSON kịch bản; không gửi lại bước đã chấp nhận',output.text):null;
+        if(output?.accepted===false&&corrected===null)return;
+        if(!confirm('Đã kiểm tra lượt cũ? Chỉ tiếp tục phần còn thiếu, giữ đúng tab và đầu vào đã chốt.'))return;
+        await resumeJob(job.id,corrected);queueKey='';await render();
+      }));
+
       if (job.status === "queued")
         actions.append(
           button("Chạy", async () => {
-            await startJob(job.id, () => void render());
+            await queueRunner.start(Number(concurrency.value));
             await render();
           }),
         );
@@ -824,17 +874,26 @@ export async function mountBatch(host, kind) {
           }),
         );
       row.append(actions);
-      history.append(row);
+      rows.append(row);
     }
-    if (!jobs.length) history.append(el("p", "Chưa có tác vụ.", "intro"));
+    if (!jobs.length) rows.append(el("p", "Chưa có tác vụ.", "intro"));
+    if (!alive || revision !== queueRevision) return;
+    history.replaceChildren(rows);
+    queueKey = nextKey;
   }
   await recoverJobs();
+  queueUnsubscribe = queueRunner.subscribe(state => {
+    queueState.textContent = (state.enabled ? 'Đang cấp việc' : 'Tạm dừng · chưa cấp việc mới') + (state.owner ? ' · Trang quản lý' : '') + (state.error ? ' · ' + state.error : '');
+    void render();
+  });
   await render();
   const timer = setInterval(() => void render(), 3000);
   return () => {
     alive = false;
     abort.abort();
     host.classList.remove("batch-page");
+    document.body.classList.remove("batch-route");
+    queueUnsubscribe();
     for (const url of assetURLs.values()) URL.revokeObjectURL(url);
     clearInterval(timer);
   };
