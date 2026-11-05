@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/mktminhqpbga-glitch/app-mooz",
+  "commit": "09d54eb8f0211679a4ea483c16f26b123cd23050",
+  "version": "0.69.0",
+  "files": {
+    "desktop/chrome-relay.cjs": "c3ed10dfac7f09c96b5a725fe26b7ce23352136e1e121459f82ad42f51144467",
+    "desktop/outbound-relay.cjs": "6f18b10b675d6c0d392984932afd4314ead05b81c9c838a78b045e38f8be764a",
+    "desktop/ai-dispatch.cjs": "c49f9636052e38af4a7cf224573894a89964f98b83486c068c1b218a1ed233dd",
+    "desktop/policy.cjs": "52cf23f9a9f765462f449dfe430fea62d4931a81dabebd792dd98f7368719102",
+    "ai-sites.js": "9cbaa492ab622d471953164be1b881e8dd9fcafd92eaf762ea606736cfa49eae",
+    "chrome-remote-protocol.js": "ea203bf24a60dbb44a6da8ec3dd6c9183ac216b2721b8de6d0e83a24e67ab421",
+    "chrome-relay-channel.js": "7709f0088fc820a8fe9e4bc26210431027216f12f84b1e54b8ceafea3edaf922",
+    "chrome-remote-diagnostics.js": "1d6003f25eba47c4352f20afb5361fde7cf9ff5d72ca88514499d2fb45a5b509",
+    "canvas-image-editor.js": "e307403c6ec7d71c83f29d745bea4ba0684d9b2305e7be388f343f13767bf831",
+    "canvas-image-editor.css": "614e865d8ead15afb9818a8143a9372018b427d7d97ce76c2444f1a6677d6305",
+    "extension/Workflow-Connect.zip": "5da9c739d5a2af79d205e3d295fb7e4d7f988f0d1df1f04db4438a0faf2e3ae8"
+  },
+  "adaptations": [
+    "canvas-image-editor.js: output adapter renamed to MooZCVNMediaEditorTarget"
+  ]
+}
