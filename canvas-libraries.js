@@ -69,11 +69,22 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
       card.classList.toggle('selected', selected?.id === person.id);
       card.setAttribute('aria-pressed', String(selected?.id === person.id));
       const preview = el('div', undefined, 'character-card-preview');
+      preview.append(el('span', 'Đang tải ảnh…', 'character-preview-message'));
       card.append(preview, el('strong', person.name)); gallery.append(card);
       void readAsset(person.assetId).then(asset => {
-        if (!asset || !preview.isConnected) return;
-        const image = el('img'); image.src = urlFor(asset); image.alt = person.name; image.draggable = false; preview.append(image);
-      }).catch(() => {});
+        if (!preview.isConnected) return;
+        if (!asset || asset.kind !== 'image' || !(asset.blob instanceof Blob)) {
+          preview.replaceChildren(el('span', 'Không tìm thấy ảnh. Chọn Chỉnh sửa để tải lại.', 'character-preview-message'));
+          return;
+        }
+        const image = el('img');
+        image.alt = person.name; image.draggable = false;
+        image.onload = () => { if (preview.isConnected) preview.replaceChildren(image); };
+        image.onerror = () => { if (preview.isConnected) preview.replaceChildren(el('span', 'Không đọc được ảnh. Chọn Chỉnh sửa để thay ảnh.', 'character-preview-message')); };
+        image.src = urlFor(asset);
+      }).catch(() => {
+        if (preview.isConnected) preview.replaceChildren(el('span', 'Chưa đọc được ảnh nhân vật.', 'character-preview-message'));
+      });
     }
     add.disabled = edit.disabled = !selected;
     reference.disabled = !selected || !canReference;
@@ -85,12 +96,30 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
     name.value = person?.name || ''; name.required = true; name.maxLength = 100;
     notes.value = person?.prompt || ''; notes.maxLength = 2000; notes.rows = 3;
     file.type = 'file'; file.accept = 'image/*'; file.required = !person;
+    const filePreview = el('div', undefined, 'character-upload-preview');
+    filePreview.hidden = true;
+    let previewURL;
+    const showPreview = blob => {
+      if (previewURL) URL.revokeObjectURL(previewURL);
+      previewURL = URL.createObjectURL(blob);
+      const image = el('img'); image.src = previewURL; image.alt = 'Ảnh nhân vật đã chọn';
+      filePreview.replaceChildren(image); filePreview.hidden = false;
+    };
+    file.onchange = () => {
+      if (!file.files[0]) return;
+      showPreview(file.files[0]);
+      if (!name.value.trim()) name.value = file.files[0].name.replace(/\.[^.]+$/, '').slice(0, 100);
+    };
+    if (person?.assetId) void readAsset(person.assetId).then(asset => {
+      if (asset?.blob && editDialog.isConnected && !file.files.length) showPreview(asset.blob);
+    }).catch(() => {});
     for (const value of ['', 'Nữ', 'Nam', 'Khác']) personGender.add(new Option(value || 'Chưa ghi', value));
     for (const value of ['', 'Trẻ em', 'Thanh niên', 'Trung niên', 'Cao tuổi']) personAge.add(new Option(value || 'Chưa ghi', value));
     personGender.value = person?.gender || ''; personAge.value = person?.ageGroup || ''; personRegion.value = person?.region || ''; personRegion.maxLength = 100;
     form.append(el('h2', person ? 'Chỉnh sửa nhân vật' : 'Tạo nhân vật mới'));
     for (const [label, control] of [['Tên nhân vật', name], ['Mô tả', notes], ['Ảnh nhân vật', file], ['Giới tính', personGender], ['Nhóm tuổi', personAge], ['Khu vực', personRegion]]) {
       const row = el('label', label); control.setAttribute('aria-label', label); row.append(control); form.append(row);
+      if (control === file) form.append(filePreview);
     }
     const actions = el('div', undefined, 'project-actions'), save = el('button', 'Lưu nhân vật'); save.type = 'submit';
     actions.append(button('Hủy', () => editDialog.close()));
@@ -113,7 +142,7 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
       finally { save.disabled = false; }
     };
     editDialog.append(form); dialog.append(editDialog);
-    editDialog.addEventListener('close', () => editDialog.remove(), { once: true }); editDialog.showModal();
+    editDialog.addEventListener('close', () => { if (previewURL) URL.revokeObjectURL(previewURL); editDialog.remove(); }, { once: true }); editDialog.showModal();
   }
   try { await load(); } catch (error) { notice(error.message); }
 }
