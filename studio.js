@@ -20,7 +20,7 @@ import {
   remove,
 } from "./core/storage.js";
 import { createJob, startJob, stopJob } from "./core/runner.js";
-import { api, providerList, el, button, notice } from "./client-api.js";
+import { api, providerList, connectedAI, el, button, notice } from "./client-api.js";
 const repo = new ProjectRepository();
 export async function mountStudio(host, id) {
   if (!id) {
@@ -198,11 +198,12 @@ export async function mountStudio(host, id) {
     drawFrame = null,
     wheelSave = null,
     inlineSave = null;
-  const referencePickerOpen = new Set(), renderedNodes = new Map(), newAssetCenters = new Map();
+  const referencePickerOpen = new Set(), renderedNodes = new Map(), nodeRenderKeys = new Map(), newAssetCenters = new Map();
   const bindings = new Map(),
+    tabLabelRefreshers = new Map(),
     activeJobs = new Map(),
     batches = new Map();
-  let canvasNavigation = null;
+  let canvasNavigation = null, renderedContextKey = "", contextCard = null, busyTabIds = new Set();
   let panMode = false,
     connectionCapabilities = null,
     pendingLink = null,
@@ -754,9 +755,12 @@ export async function mountStudio(host, id) {
   }
   function render() {
     const graph = controller.snapshot();
-    renderedNodes.clear();
-    for (const old of stage.querySelectorAll(".cvn-node,.cvn-group"))
-      old.remove();
+    const ids = new Set(graph.nodes.map(node => node.id));
+    for (const old of stage.querySelectorAll(".cvn-node")) if (!ids.has(old.dataset.id)) {
+      bindings.delete(old.dataset.id); tabLabelRefreshers.delete(old.dataset.id);
+      renderedNodes.delete(old.dataset.id); nodeRenderKeys.delete(old.dataset.id); old.remove();
+    }
+    for (const old of stage.querySelectorAll(".cvn-group")) old.remove();
     for (const g of graph.groups) {
       const ns = graph.nodes.filter((n) => g.nodeIds.includes(n.id));
       if (!ns.length) continue;
@@ -773,27 +777,39 @@ export async function mountStudio(host, id) {
       stage.append(box);
     }
     for (const n of graph.nodes) {
-      const card = el(
+      const existing = stage.querySelector(`.cvn-node[data-id="${CSS.escape(n.id)}"]`),
+        key = JSON.stringify([n.type, n.data, graph.edges.filter(edge => edge.target === n.id || edge.source === n.id)]);
+      if (existing && nodeRenderKeys.get(n.id) === key) {
+        const cached = renderedNodes.get(n.id); cached.x = n.x; cached.y = n.y;
+        Object.assign(existing.style, { left: n.x + "px", top: n.y + "px" });
+        continue;
+      }
+      const keepMedia = existing && n.data.assetId && renderedNodes.get(n.id)?.data.assetId === n.data.assetId,
+        card = existing || el(
           "article",
           undefined,
           "cvn-node " + (selection.has(n.id) ? "selected " : ""),
         ),
         title = el("div", undefined, "cvn-node-title"),
-        body = el("div", undefined, "cvn-node-body");
+        body = existing?.querySelector(":scope > .cvn-node-body") || el("div", undefined, "cvn-node-body");
+      if (existing) for (const child of [...existing.children]) if (child !== body && !(keepMedia && child.classList.contains("cvn-dimensions"))) child.remove();
+      if (!keepMedia) body.replaceChildren();
       card.dataset.id = n.id;
       renderedNodes.set(n.id, n);
+      nodeRenderKeys.set(n.id, key);
       title.append(el("span", n.data.customName || n.type, "node-title-name"));
       if (["generateImage", "generateVideo"].includes(n.type)) {
         card.classList.add(n.type === "generateImage" ? "image-generation-node" : "video-generation-node");
         title.prepend(icon(n.type === "generateImage" ? "image" : "video"));
       }
       Object.assign(card.style, { left: n.x + "px", top: n.y + "px" });
-      card.append(title, body);
+      card.append(title);
+      if (body.parentElement !== card) card.append(body);
       if (["generateImage", "generateVideo"].includes(n.type))
         setPreviewRatio(body, n.data.size || "16:9");
       if (n.data.assetId) {
-        stage.append(card);
-        void assetView(n.data.assetId, body);
+        if (!card.isConnected) stage.append(card);
+        if (!keepMedia) void assetView(n.data.assetId, body);
       } else if (n.type === "prompt") {
         const text = el("textarea");
         text.value = n.data.text || "";
@@ -806,8 +822,15 @@ export async function mountStudio(host, id) {
             patch: { text: text.value },
           });
         body.append(text);
-      } else if (n.type === "generateText" && n.data.text) {
-        body.append(el("p", n.data.text));
+      } else if (n.type === "generateText") {
+        body.classList.add("script-node-body");
+        const text = el("textarea");
+        text.value = n.data.text || "";
+        text.placeholder = "Kịch bản văn bản sẽ xuất hiện ở đây. Bạn cũng có thể nhập hoặc sửa trực tiếp…";
+        text.setAttribute("aria-label", "Nội dung kịch bản");
+        text.maxLength = 50000;
+        text.oninput = () => { updateInline(n.id, { text: text.value }); renderContext(); };
+        body.append(text);
       } else {
         const placeholder = el("span", undefined, "cvn-empty-symbol");
         if (n.type === "generateImage") placeholder.append(icon("image"));
@@ -1040,27 +1063,30 @@ export async function mountStudio(host, id) {
       });
   }
   function drawWires() {
-    wires.replaceChildren();
     const graph = controller.snapshot();
+    const existing = new Map([...wires.querySelectorAll('g[data-edge-id]')].map(group => [group.dataset.edgeId, group])), active = new Set();
     for (const e of graph.edges) {
       const a = stage.querySelector(`[data-id="${CSS.escape(e.source)}"]`),
         b = stage.querySelector(`[data-id="${CSS.escape(e.target)}"]`);
       if (!a || !b) continue;
       const start = portCenter(a, "output"), end = portCenter(b, "input");
       if (!start || !end) continue;
-      const x = start.x, y = start.y, tx = end.x, ty = end.y,
-        path = document.createElementNS(wires.namespaceURI, "path");
-      path.setAttribute(
-        "d",
-        `M${a.offsetLeft + a.offsetWidth} ${y} L${x} ${y} C${x + 100} ${y},${tx - 100} ${ty},${tx} ${ty} L${b.offsetLeft} ${ty}`,
-      );
-      if (e.targetPort === "workflow") path.classList.add("workflow-order-wire");
-      wires.append(path);
-      const flow = path.cloneNode();
-      flow.classList.add("cvn-wire-flow");
-      flow.setAttribute("pathLength", "1000");
-      wires.append(flow);
+      const x = start.x, y = start.y, tx = end.x, ty = end.y;
+      let group = existing.get(e.id);
+      if (!group) {
+        group = document.createElementNS(wires.namespaceURI, "g"); group.dataset.edgeId = e.id;
+        const path = document.createElementNS(wires.namespaceURI, "path"), flow = path.cloneNode();
+        flow.classList.add("cvn-wire-flow"); flow.setAttribute("pathLength", "1000");
+        group.append(path, flow); wires.append(group);
+      }
+      active.add(e.id);
+      for (const path of group.children) {
+        path.setAttribute("d", `M${a.offsetLeft + a.offsetWidth} ${y} L${x} ${y} C${x + 100} ${y},${tx - 100} ${ty},${tx} ${ty} L${b.offsetLeft} ${ty}`);
+        path.classList.toggle("workflow-order-wire", e.targetPort === "workflow");
+      }
     }
+    for (const [id, group] of existing) if (!active.has(id)) group.remove();
+    wires.querySelector('.connection-draft-wire')?.remove();
     if (linkDrag) {
       const card = stage.querySelector(`[data-id="${CSS.escape(linkDrag.id)}"]`),
         start = card && portCenter(card, linkDrag.side),
@@ -1134,12 +1160,50 @@ export async function mountStudio(host, id) {
       }
     }
     scheduleWires();
-    context.replaceChildren();
     context.hidden = true;
     if (movingNode || selection.size !== 1) return;
     const n = controller.snapshot().nodes.find((n) => selection.has(n.id));
     if (!n) return;
     const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`);
+    const hasMedia = Boolean(card?.querySelector('.cvn-node-body > img,.cvn-node-body > video'));
+    if (!["generateText", "prompt", "generateImage", "imageInput", "generateVideo", "videoInput"].includes(n.type) && !hasMedia) return;
+    const toolbarKey = JSON.stringify([n.id, n.type, n.data, hasMedia, connectionCapabilities]);
+    if (renderedContextKey === toolbarKey && contextCard === card) {
+      context.hidden = false; positionFloatingPanels(); return;
+    }
+    renderedContextKey = toolbarKey; contextCard = card;
+    context.replaceChildren();
+    if (["generateText", "prompt"].includes(n.type)) {
+      context.hidden = false;
+      context.classList.remove("cvn-video-toolbar");
+      context.setAttribute("aria-label", "Công cụ văn bản đã chọn");
+      const current = () => controller.snapshot().nodes.find(node => node.id === n.id),
+        text = () => current()?.data.text || "";
+      const edit = button("Sửa văn bản", () => card.querySelector('.cvn-node-body textarea')?.focus({ preventScroll: true })),
+        split = button("Tách văn bản", () => {}),
+        download = button("Tải .txt", () => downloadNode(current())),
+        copy = button("Sao chép", async () => { await navigator.clipboard.writeText(text()); notice("Đã sao chép văn bản"); }),
+        duplicate = button("Nhân bản", () => duplicateNode(current()));
+      bindInlinePopup(split, () => {
+        resourcePanel("Tách văn bản");
+        const mode = el("select"), count = el("p");
+        mode.setAttribute("aria-label", "Cách tách văn bản");
+        mode.add(new Option("Theo đoạn trống", "paragraph")); mode.add(new Option("Theo từng dòng", "line"));
+        const parts = () => text().split(mode.value === "line" ? /\r?\n/ : /\r?\n\s*\r?\n/).map(part => part.trim()).filter(Boolean);
+        const update = () => { count.textContent = parts().length + " đoạn · giữ nguyên bản gốc"; };
+        mode.onchange = update; update();
+        editor.append(mode, count, button("Tạo node từ các đoạn", () => {
+          const chunks = parts();
+          if (chunks.length < 2 || chunks.length > 50) throw Error("Cần từ 2 đến 50 đoạn để tách.");
+          const source = current(), graph = { version: 1, nodes: chunks.map((part, index) => ({ id: crypto.randomUUID(), type: "prompt", x: source.x + 300, y: source.y + index * 220 - 100, data: { text: part, customName: "Đoạn " + (index + 1) } })), edges: [], groups: [], viewport: { x: 0, y: 0, zoom: 1 } };
+          command({ type: "insertGraph", graph }); editor.close();
+        }));
+      });
+      download.disabled = copy.disabled = split.disabled = !text().trim();
+      context.append(edit, split, download, copy, duplicate);
+      positionFloatingPanels();
+      return;
+    }
     const image = card?.querySelector(".cvn-node-body > img"),
       video = card?.querySelector(".cvn-node-body > video");
     const isVideo = Boolean(video || ["generateVideo", "videoInput"].includes(n.type)),
@@ -1397,9 +1461,25 @@ export async function mountStudio(host, id) {
     footer.addEventListener("toggle", () => positionNativeMenus(), true);
     provider.setAttribute("aria-label", "AI thực hiện");
     provider.add(new Option("Chọn AI…", ""));
-    for (const p of providerList.filter((p) => p.types.includes(kind)))
-      provider.add(new Option(p.name, p.id));
-    provider.value = n.data.provider ?? "";
+    const desiredProvider = n.data.provider || "";
+    let providerRevision = 0;
+    async function refreshProviders() {
+      const revision = ++providerRevision, chosen = provider.value || desiredProvider;
+      try {
+        const available = await connectedAI(kind);
+        if (!composer.isConnected || revision !== providerRevision) return;
+        provider.replaceChildren(new Option(available.length ? "Chọn AI…" : "Chưa có AI kết nối", ""));
+        for (const item of available) provider.add(new Option(item.name, item.id));
+        provider.value = available.some(item => item.id === chosen) ? chosen : "";
+        connection.hidden = !provider.value || ["openai", "google"].includes(provider.value);
+      } catch (error) {
+        if (composer.isConnected && revision === providerRevision) {
+          provider.replaceChildren(new Option("Chưa có AI kết nối", ""));
+          hint.textContent = error.message;
+        }
+      }
+    }
+    provider.addEventListener("focus", () => void refreshProviders());
     ratio.setAttribute("aria-label", "Tỷ lệ");
     for (const r of ["1:1", "1:2", "2:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21"])
       ratio.add(new Option(r, r));
@@ -1520,7 +1600,7 @@ export async function mountStudio(host, id) {
     connection.append(tabSummary, connectionPanel);
     function refreshTabSummary(label = "Tab AI") {
       if (kind === "text") tabSummary.textContent = label;
-      else tabSummary.replaceChildren(icon("reference"));
+      else tabSummary.replaceChildren(icon("reference"), el("span", label, "tab-binding-label"));
       tabSummary.title = label;
       tabSummary.setAttribute("aria-label", "Chọn tab AI: " + label);
     }
@@ -1534,29 +1614,50 @@ export async function mountStudio(host, id) {
       refreshTabSummary(binding.title);
     }
     let tabRevision = 0;
+    const tabLabel = (tab, state = "Sẵn sàng") => {
+      const validIds = new Set(controller.snapshot().nodes.map(node => node.id));
+      const count = [...bindings].filter(([nodeId, binding]) => validIds.has(nodeId) && binding.id === Number(tab.id)).length;
+      return `${count} node · ${tab.title || tab.url} · ${state}`;
+    };
+    tabLabelRefreshers.set(id, () => {
+      for (const option of [...tabs.options].filter(option => option.value)) {
+        const state = option.dataset.state === "Mất kết nối" ? "Mất kết nối" : option.dataset.busy === "true" || busyTabIds.has(Number(option.value)) ? "Đang xử lý" : "Sẵn sàng";
+        option.textContent = tabLabel({ id: option.value, title: option.dataset.title || bindings.get(id)?.title || option.textContent }, state);
+      }
+      const selected = tabs.selectedOptions[0];
+      refreshTabSummary(selected?.value ? selected.textContent : "Chọn tab AI");
+    });
     async function refreshTabs() {
       const seq = ++tabRevision,
         value = provider.value;
       tabs.disabled = true;
       try {
-        const available = await api("tabs?provider=" + value);
+        const [available, jobs] = await Promise.all([api("tabs?provider=" + value), list("jobs")]);
         if (!composer.isConnected || seq !== tabRevision) return;
         tabs.replaceChildren(new Option("Chọn tab AI…", ""));
+        busyTabIds = new Set(jobs.filter(job => ["preparing", "sent", "receiving"].includes(job.status)).map(job => job.tabId));
         for (const t of available) {
-          const o = new Option(t.title || t.url, t.id);
+          const state = t.busy || jobs.some(job => job.tabId === t.id && ["preparing", "sent", "receiving"].includes(job.status)) ? "Đang xử lý" : "Sẵn sàng";
+          const o = new Option(tabLabel(t, state), t.id);
           o.dataset.url = t.url;
+          o.dataset.title = t.title || t.url;
+          o.dataset.state = state;
+          o.dataset.busy = String(Boolean(t.busy));
           tabs.add(o);
         }
         const saved = bindings.get(id);
         if (saved?.provider === value) {
           if (!available.some((t) => t.id === saved.id)) {
-            const offline = new Option("Tab đã chọn · ngoại tuyến", saved.id);
+            const offline = new Option(tabLabel({ id: saved.id, title: saved.title }, "Mất kết nối"), saved.id);
             offline.dataset.url = saved.url;
+            offline.dataset.title = saved.title;
+            offline.dataset.state = "Mất kết nối";
             offline.disabled = true;
             tabs.add(offline);
           }
           tabs.value = String(saved.id);
         }
+        tabLabelRefreshers.get(id)?.();
         hint.textContent = available.length
           ? ""
           : "Chưa có tab kết nối. Mở Kết nối AI ở góc trên.";
@@ -1576,21 +1677,24 @@ export async function mountStudio(host, id) {
         bindings.set(id, {
           id: Number(tabs.value),
           url: o.dataset.url,
-          title: o.textContent,
+          title: o.dataset.title || o.textContent,
           provider: provider.value,
         });
       else bindings.delete(id);
-      refreshTabSummary(o?.textContent || "Tab AI");
+      for (const update of tabLabelRefreshers.values()) update();
     };
     provider.onchange = () => {
+      providerRevision++;
       updateInline(id, { provider: provider.value });
       bindings.delete(id);
+      for (const update of tabLabelRefreshers.values()) update();
       tabs.replaceChildren(new Option("Chọn tab AI…", ""));
       refreshTabSummary();
       connection.hidden = ["openai", "google"].includes(provider.value);
-      if (!connection.hidden && connection.open) void refreshTabs();
+      if (!connection.hidden && provider.value) { connection.open = true; void refreshTabs(); }
     };
     connection.hidden = ["openai", "google"].includes(provider.value);
+    queueMicrotask(() => void refreshProviders());
     const send = button(
       "↑",
       async () => {
@@ -2298,10 +2402,11 @@ export async function mountStudio(host, id) {
   }
   async function downloadNode(node) {
     const asset = node.data.assetId && await readAsset(node.data.assetId);
-    const blob = asset?.blob || new Blob([node.data.text || JSON.stringify({ format: "mooz-cvn-node", node }, null, 2)], { type: node.data.text ? "text/plain" : "application/json" });
+    const isText = ["prompt", "generateText"].includes(node.type);
+    const blob = asset?.blob || new Blob([isText ? node.data.text || "" : JSON.stringify({ format: "mooz-cvn-node", node }, null, 2)], { type: isText ? "text/plain;charset=utf-8" : "application/json" });
     const link = el("a"), url = URL.createObjectURL(blob);
     link.href = url;
-    link.download = asset?.name || (node.data.customName || "MooZ-node") + (node.data.text ? ".txt" : ".json");
+    link.download = asset?.name || (node.data.customName || "MooZ-node") + (isText ? ".txt" : ".json");
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -2663,10 +2768,18 @@ export async function mountStudio(host, id) {
     { signal: abort.signal },
   );
   render();
+  const tabStatusTimer = setInterval(() => {
+    void list("jobs").then(jobs => {
+      if (disposed) return;
+      busyTabIds = new Set(jobs.filter(job => ["preparing", "sent", "receiving"].includes(job.status)).map(job => job.tabId));
+      for (const update of tabLabelRefreshers.values()) update();
+    }).catch(() => {});
+  }, 3000);
   return () => {
     disposed = true;
     clearTimeout(wheelSave);
     clearTimeout(inlineSave);
+    clearInterval(tabStatusTimer);
     if (drawFrame) cancelAnimationFrame(drawFrame);
     abort.abort();
     shell.remove();

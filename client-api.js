@@ -54,6 +54,24 @@ export const providerList = [
   { id: "openai", name: "OpenAI · API", types: ["text", "image"] },
   { id: "google", name: "Gemini · API", types: ["text", "image"] },
 ];
+const connectedAICache = new Map();
+export function connectedAI(kind) {
+  const cached = connectedAICache.get(kind);
+  if (cached && Date.now() - cached.at < 3000) return cached.promise;
+  const promise = loadConnectedAI(kind);
+  connectedAICache.set(kind, { at: Date.now(), promise });
+  return promise;
+}
+async function loadConnectedAI(kind) {
+  const status = await api("status"), available = [];
+  const candidates = providerList.filter(provider => provider.types.includes(kind));
+  const chrome = status.chrome?.connected ? candidates.filter(provider => !["openai", "google"].includes(provider.id)) : [];
+  const tabs = await Promise.allSettled(chrome.map(async provider => ({ ...provider, tabs: await api("tabs?provider=" + provider.id) })));
+  for (const result of tabs) if (result.status === "fulfilled" && result.value.tabs.length) available.push(result.value);
+  for (const provider of candidates.filter(provider => ["openai", "google"].includes(provider.id)))
+    if (status.providers?.some(item => item.id === provider.id && item.ready && item.types?.includes(kind))) available.push({ ...provider, tabs: [] });
+  return available;
+}
 export function notice(message) {
   const h = document.getElementById("toast");
   h.textContent = message;

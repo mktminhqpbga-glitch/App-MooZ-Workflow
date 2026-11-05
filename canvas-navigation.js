@@ -3,7 +3,7 @@ import { icon } from './icons.js';
 import { list, addAsset } from './core/storage.js';
 
 export function createCanvasNavigation({ shell, hud, zoomNode, projectId, getName, getGraph, getRects, onSelectNode, onCenter, onLayout, onOpenLibrary, onUseAsset, onUsePrompt, onUseTemplate, signal }) {
-  let open = false, activeTab = 'assets', category = 'inputs', search = '', reverse = false, request = 0;
+  let open = false, activeTab = 'assets', category = 'inputs', search = '', reverse = false, request = 0, contentKey = '';
   let prefs = {};
   try { prefs = JSON.parse(localStorage.getItem('mooz-canvas-tools') || '{}'); } catch {}
   let snap = Boolean(prefs.snap), minimapVisible = Boolean(prefs.minimap), wiresHidden = Boolean(prefs.wiresHidden);
@@ -100,6 +100,9 @@ export function createCanvasNavigation({ shell, hud, zoomNode, projectId, getNam
       items = items.filter(item => (item.name || item.data?.customName || item.type || '').toLocaleLowerCase('vi').includes(search));
       if (activeTab === 'assets') items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       if (reverse) items.reverse();
+      const nextKey = JSON.stringify([activeTab, category, search, reverse, categories, items.map(item => [item.id, item.name, item.data?.customName, item.type, item.kind, item.updatedAt, item.blob?.size])]);
+      if (nextKey === contentKey && body.children.length) return;
+      contentKey = nextKey;
       body.replaceChildren();
       if (!items.length) {
         const empty = el('div', undefined, 'canvas-assets-empty');

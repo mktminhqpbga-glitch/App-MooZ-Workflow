@@ -147,7 +147,7 @@ const server = createServer(async (req, res) => {
         return json(
           res,
           200,
-          (await chrome.tabs(url.searchParams.get("provider"))).filter(tab => url.searchParams.get("purpose") === "assistant-setup" || tab.id !== assistantTab.snapshot()?.tabId),
+          (await chrome.tabs(url.searchParams.get("provider"))).filter(tab => url.searchParams.get("purpose") === "assistant-setup" || tab.id !== assistantTab.snapshot()?.tabId).map(tab => ({ ...tab, busy: jobs.resources.has("tab:" + tab.id) })),
         );
       if (path === "/api/assistant/config" && req.method === "GET")
         return json(res, 200, { assistantTab: assistantTab.snapshot() });

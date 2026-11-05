@@ -19,6 +19,7 @@ export async function createJob({
   chatURL = null,
   title = "Tác vụ",
   kind = null,
+  batchLane = null,
 }) {
   if (!["google", "openai"].includes(provider)) assertWorkflowTabAvailable(tabId);
   const snapshot = validateGraph(graph),
@@ -67,6 +68,7 @@ export async function createJob({
     tabId,
     chatURL,
     kind,
+    batchLane,
     status: "queued",
     createdAt: new Date().toISOString(),
     outputs: {},
