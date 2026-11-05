@@ -1213,6 +1213,13 @@ dialog .project-actions {
   outline: 1px solid var(--ink);
   outline-offset: 3px;
 }
+.cvn-node:has(.inline-footer details[open]) { z-index: 11; }
+.inline-footer details > div > .resource-panel-heading {
+  position: sticky;
+  top: -20px;
+  z-index: 1;
+  background: var(--panel);
+}
 .cvn-node img,
 .cvn-node video {
   display: block;

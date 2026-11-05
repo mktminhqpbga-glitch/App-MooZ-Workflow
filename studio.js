@@ -571,6 +571,21 @@ export async function mountStudio(host, id) {
   function transform() {
     stage.style.transform = `translate(${pan.x}px,${pan.y}px) scale(${pan.zoom})`;
     zoom.textContent = Math.round(pan.zoom * 100) + "%";
+    positionNativeMenus();
+  }
+  function positionNativeMenus() {
+    for (const menu of stage.querySelectorAll('.inline-footer details[open]')) {
+      const anchor = menu.querySelector(':scope > summary'), panel = menu.querySelector(':scope > div');
+      if (!anchor || !panel) continue;
+      const rect = anchor.getBoundingClientRect(), origin = menu.getBoundingClientRect();
+      panel.style.maxHeight = Math.max(24, Math.min(650, (rect.top - 24) / pan.zoom)) + "px";
+      panel.style.maxWidth = Math.max(24, (innerWidth - 24) / pan.zoom) + "px";
+      panel.style.overflowY = "auto";
+      panel.style.bottom = (origin.bottom - rect.top + 12) / pan.zoom + "px";
+      const width = panel.getBoundingClientRect().width;
+      const left = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, innerWidth - width - 12));
+      panel.style.left = (left - origin.left) / pan.zoom + "px";
+    }
   }
   function setZoom(z) {
     pan.zoom = Math.max(0.1, Math.min(4, z));
@@ -1379,6 +1394,7 @@ export async function mountStudio(host, id) {
       tabSummary = el("summary", "Tab AI"),
       tabs = el("select"),
       hint = el("p", undefined, "inline-status");
+    footer.addEventListener("toggle", () => positionNativeMenus(), true);
     provider.setAttribute("aria-label", "AI thực hiện");
     provider.add(new Option("Chọn AI…", ""));
     for (const p of providerList.filter((p) => p.types.includes(kind)))
@@ -2602,6 +2618,7 @@ export async function mountStudio(host, id) {
   }, { signal: abort.signal });
   window.addEventListener("pointercancel", () => { linkDrag = null; clearConnectionTargets(); scheduleWires(); }, { signal: abort.signal });
   window.addEventListener("resize", scheduleWires, { signal: abort.signal });
+  window.addEventListener("resize", positionNativeMenus, { signal: abort.signal });
   window.addEventListener(
     "keydown",
     (e) => {

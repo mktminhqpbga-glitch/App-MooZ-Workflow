@@ -116,6 +116,19 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
       assert.equal(await page.locator('.cvn-stage').getAttribute('style'), transform, 'collapsing prompt preserves zoom and pan');
     }
     await image.locator('.cvn-node-title').click();
+    await image.locator('.inline-settings > summary').click();
+    const optionsPanel = image.locator('.generation-options-panel');
+    await optionsPanel.waitFor();
+    const optionsBox = await optionsPanel.boundingBox(), optionsAnchor = await image.locator('.inline-settings > summary').boundingBox(), overlappingToolbar = await toolbar.boundingBox();
+    assert.ok(optionsBox.y >= 10 && optionsBox.y + optionsBox.height < optionsAnchor.y, 'settings stays above its trigger and inside the viewport');
+    const overlap = { left: Math.max(optionsBox.x, overlappingToolbar.x), right: Math.min(optionsBox.x + optionsBox.width, overlappingToolbar.x + overlappingToolbar.width), top: Math.max(optionsBox.y, overlappingToolbar.y), bottom: Math.min(optionsBox.y + optionsBox.height, overlappingToolbar.y + overlappingToolbar.height) };
+    assert.ok(overlap.right > overlap.left && overlap.bottom > overlap.top, 'fixture reproduces overlapping popup and toolbar');
+    assert.equal(await optionsPanel.evaluate((panel, area) => panel.contains(document.elementFromPoint((area.left + area.right) / 2, (area.top + area.bottom) / 2)), overlap), true, 'settings paints above the image toolbar');
+    await optionsPanel.evaluate(panel => { panel.scrollTop = panel.scrollHeight; });
+    await optionsPanel.getByRole('group', { name: 'Số lượng ảnh', exact: true }).getByRole('button', { name: '2 ảnh', exact: true }).click();
+    await optionsPanel.getByLabel('Đóng thông số', { exact: true }).click();
+    assert.equal(await optionsPanel.isVisible(), false);
+    assert.ok((await page.locator('.cvn-stage').getAttribute('style')).includes('scale(0.65)'), 'settings never changes zoom');
     await image.getByRole('button', { name: 'Tham chiếu', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.canvas-reference-card').length === 3);
     assert.equal(await image.locator('.canvas-reference-card img').count(), 2);
