@@ -786,6 +786,28 @@ select {
   color: var(--muted);
   font-size: 12px;
 }
+.canvas-launcher > .intro {
+  margin-bottom: 20px;
+}
+.canvas-launcher > .project-actions {
+  margin-bottom: 24px;
+}
+.canvas-project-list {
+  margin-top: 0;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+.canvas-project-card {
+  display: flex;
+  align-items: center;
+  min-height: 88px;
+  padding: 22px;
+}
+.canvas-project-card strong {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
 .project-stats {
   display: flex;
   gap: 40px;
