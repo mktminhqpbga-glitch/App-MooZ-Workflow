@@ -2233,9 +2233,6 @@ dialog form > textarea {
     width: 38px;
     height: 38px;
   }
-  .cvn-image-toolbar {
-    top: 75px !important;
-  }
   .cvn-image-toolbar > button {
     font-size: 11px;
   }
@@ -2834,3 +2831,23 @@ dialog form > textarea {
   .image-primary-tools, .image-utility-tools { gap: 2px; }
   .image-utility-tools { padding-left: 6px; margin-left: 2px; }
 }
+
+/* The selected node owns two floating panels, centered around its preview. */
+.cvn-stage > .cvn-image-toolbar {
+  pointer-events: auto;
+  width: 760px;
+  max-width: none;
+  min-height: 46px;
+  justify-content: space-between;
+}
+.generation-node:has(> .cvn-node-body[style*="--preview-ratio"]) > .inline-composer {
+  position: absolute;
+  top: calc(100% + 24px);
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 0;
+  margin-left: 0 !important;
+  z-index: 9;
+}
+.cvn-stage > .cvn-video-toolbar { justify-content: flex-end; gap: 8px; }
+.cvn-stage > .cvn-video-toolbar > .video-frame-menu { margin-right: auto; }

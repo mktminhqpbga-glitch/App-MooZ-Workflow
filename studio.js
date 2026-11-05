@@ -343,7 +343,7 @@ export async function mountStudio(host, id) {
   shell.append(hud);
   const context = el("div", undefined, "panel cvn-image-toolbar");
   context.hidden = true;
-  shell.append(context);
+  stage.append(context);
   const files = el("input");
   files.type = "file";
   files.multiple = true;
@@ -416,17 +416,22 @@ export async function mountStudio(host, id) {
   function fit() {
     const nodes = controller.snapshot().nodes;
     if (!nodes.length) return;
+    positionFloatingPanels();
     const bounds = nodes.map(n => {
       const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`),
-        composer = card?.querySelector(".inline-composer:not([hidden])");
+        composer = card?.querySelector(".inline-composer:not([hidden])"),
+        toolbar = !context.hidden && selection.has(n.id) ? context : null,
+        cardWidth = card?.offsetWidth || 340,
+        composerLeft = composer ? (cardWidth - composer.offsetWidth) / 2 : 0;
       return {
-        left: n.x + Math.min(0, composer?.offsetLeft || 0),
-        right: n.x + Math.max(card?.offsetWidth || 340, composer ? composer.offsetLeft + composer.offsetWidth : 0),
-        bottom: n.y + (card?.offsetHeight || 330),
+        left: Math.min(n.x + Math.min(0, composerLeft), toolbar ? toolbar.offsetLeft - toolbar.offsetWidth / 2 : Infinity),
+        right: Math.max(n.x + Math.max(cardWidth, composer ? composerLeft + composer.offsetWidth : 0), toolbar ? toolbar.offsetLeft + toolbar.offsetWidth / 2 : -Infinity),
+        top: Math.min(n.y - 28, toolbar ? toolbar.offsetTop : Infinity),
+        bottom: n.y + Math.max(card?.offsetHeight || 330, composer ? composer.offsetTop + composer.offsetHeight : 0),
       };
     });
     const x = Math.min(...bounds.map(b => b.left)),
-      y = Math.min(...nodes.map((n) => n.y)),
+      y = Math.min(...bounds.map(b => b.top)),
       width = Math.max(...bounds.map(b => b.right)) - x,
       height = Math.max(...bounds.map(b => b.bottom)) - y;
     pan.zoom = Math.max(
@@ -434,7 +439,7 @@ export async function mountStudio(host, id) {
       Math.min(1, (innerWidth - 80) / width, (innerHeight - 240) / height),
     );
     pan.x = (innerWidth - width * pan.zoom) / 2 - x * pan.zoom;
-    pan.y = 120 - y * pan.zoom;
+    pan.y = 90 - y * pan.zoom;
     transform();
     controller.execute({ type: "setViewport", viewport: pan });
     void persist();
@@ -779,6 +784,11 @@ export async function mountStudio(host, id) {
       };
       card.onpointermove = (e) => {
         if (drag?.mode !== "node" || drag.id !== n.id) return;
+        if (!drag.moving) {
+          if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 3) return;
+          drag.moving = true;
+          renderContext();
+        }
         drag.nx = drag.x + (e.clientX - drag.startX) / pan.zoom;
         drag.ny = drag.y + (e.clientY - drag.startY) / pan.zoom;
         for (const origin of drag.origins) {
@@ -833,6 +843,7 @@ export async function mountStudio(host, id) {
     if (!drawFrame)
       drawFrame = requestAnimationFrame(() => {
         drawFrame = null;
+        positionFloatingPanels();
         drawWires();
       });
   }
@@ -907,20 +918,29 @@ export async function mountStudio(host, id) {
       });
     }
   }
+  function positionFloatingPanels() {
+    if (context.hidden || selection.size !== 1) return;
+    const card = stage.querySelector(`[data-id="${CSS.escape([...selection][0])}"]`);
+    if (!card) return;
+    context.style.left = card.offsetLeft + card.offsetWidth / 2 + "px";
+    // The preview block includes its title, with the same gap above and below.
+    context.style.top = card.offsetTop - 28 - 24 - context.offsetHeight + "px";
+  }
   function renderContext() {
+    const movingNode = drag?.mode === "node" && drag.moving;
     for (const card of stage.querySelectorAll(".cvn-node")) {
       const selected = selection.size === 1 && selection.has(card.dataset.id);
       card.classList.toggle("selected", selected);
       const composer = card.querySelector(".inline-composer");
       if (composer) {
-        composer.hidden = !selected;
+        composer.hidden = !selected || movingNode;
         if (!selected) for (const menu of composer.querySelectorAll("details[open]")) menu.open = false;
       }
     }
     scheduleWires();
     context.replaceChildren();
     context.hidden = true;
-    if (selection.size !== 1) return;
+    if (movingNode || selection.size !== 1) return;
     const n = controller.snapshot().nodes.find((n) => selection.has(n.id));
     if (!n?.data.assetId) return;
     const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`);
@@ -1008,7 +1028,7 @@ export async function mountStudio(host, id) {
     download.append(icon("download"));
     downloadHost.append(download);
     if (trailingAction) downloadHost.append(trailingAction);
-    context.style.top = "88px";
+    positionFloatingPanels();
   }
   function updateInline(id, patch) {
     if (failed)
@@ -2044,6 +2064,7 @@ export async function mountStudio(host, id) {
   }
 
   viewport.onpointerdown = (e) => {
+    if (e.target.closest(".cvn-image-toolbar")) return;
     if (e.target.closest(".cvn-node") && !panMode) return;
     pendingLink = null;
     for (const menu of stage.querySelectorAll(".port-menu")) menu.remove();
@@ -2074,7 +2095,7 @@ export async function mountStudio(host, id) {
   viewport.addEventListener(
     "wheel",
     (e) => {
-      if (e.target.closest('textarea,video,[contenteditable="true"],.generation-options-panel')) return;
+      if (e.target.closest('textarea,video,[contenteditable="true"],.generation-options-panel,.cvn-image-toolbar')) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08,
         newZoom = Math.max(0.1, Math.min(4, pan.zoom * factor)),
