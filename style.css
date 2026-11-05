@@ -2025,3 +2025,61 @@ dialog form > textarea {
   background: #ffffff0b;
 }
 .ratio-shape { display: block; border: 1.5px solid currentColor; border-radius: 3px; }
+
+.cvn-resource-sheet.creative-assistant[open] {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 128px);
+  padding: 22px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.creative-assistant-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.creative-assistant-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.creative-assistant-heading button {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.creative-assistant > p {
+  margin: 18px 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.creative-assistant > textarea {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  max-height: 35dvh;
+  font-size: 14px;
+}
+.creative-assistant-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.creative-assistant-actions button {
+  min-height: 42px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--raised, #2b2b2b);
+  font-size: 13px;
+  line-height: 1.5;
+}
+@media (max-width: 420px) {
+  .cvn-resource-sheet.creative-assistant[open] {
+    right: 16px;
+    padding: 18px;
+  }
+  .creative-assistant-actions { grid-template-columns: 1fr; }
+}

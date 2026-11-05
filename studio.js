@@ -1306,6 +1306,7 @@ export async function mountStudio(host, id) {
     });
   }
   function resourcePanel(title) {
+    editor.classList.remove("creative-assistant");
     editor.replaceChildren(
       el("h2", title),
       button("Đóng", () => editor.close()),
@@ -1520,6 +1521,10 @@ export async function mountStudio(host, id) {
         editor.append(el("p", text));
       return;
     }
+    editor.classList.add("creative-assistant");
+    const heading = el("div", undefined, "creative-assistant-heading");
+    heading.append(...editor.childNodes);
+    editor.append(heading);
     editor.append(
       el(
         "p",
@@ -1527,14 +1532,17 @@ export async function mountStudio(host, id) {
       ),
     );
     const idea = el("textarea");
+    idea.rows = 5;
     idea.placeholder = "Ý tưởng của bạn…";
     idea.setAttribute("aria-label", "Ý tưởng sáng tạo");
     editor.append(idea);
+    const actions = el("div", undefined, "creative-assistant-actions");
+    editor.append(actions);
     for (const [type, label] of [
       ["generateImage", "Tạo ảnh từ ý tưởng"],
       ["generateVideo", "Tạo video từ ý tưởng"],
     ])
-      editor.append(
+      actions.append(
         button(label, async () => {
           const n = await addNode(type);
           updateInline(n.id, { studioPrompt: idea.value });
