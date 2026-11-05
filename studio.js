@@ -2440,9 +2440,11 @@ export async function mountStudio(host, id) {
     marquee.hidden = true;
     renderContext();
   }
-  viewport.addEventListener("pointerdown", event => {
-    if (event.button !== 1) return;
+  function startMiddlePan(event) {
     event.preventDefault(); event.stopPropagation();
+    if (drag?.mode === "pan" && drag.middle) return;
+    finishSelection(true);
+    if (drag?.mode === "node") { drag = null; refreshNodePositions(); }
     closeDockPopup(); rightMenu.close();
     drag = { mode: "pan", middle: true, startX: event.clientX, startY: event.clientY, x: pan.x, y: pan.y };
     shell.classList.add("middle-panning");
@@ -2451,9 +2453,31 @@ export async function mountStudio(host, id) {
     select.title = "Giữ chuột giữa để kéo Canvas";
     select.replaceChildren(icon("hand"), el("span", "●", "tool-mode-badge"));
     viewport.style.cursor = "grabbing";
-    viewport.setPointerCapture(event.pointerId);
+    if (event.pointerId !== undefined) viewport.setPointerCapture(event.pointerId);
+  }
+  // Pointer events omit a second button press while another mouse button is down.
+  // Keep native mouse events too, and capture above controls/media in the Canvas shell.
+  shell.addEventListener("pointerdown", event => {
+    if (event.button === 1) startMiddlePan(event);
   }, { capture: true, signal: abort.signal });
-  viewport.addEventListener("auxclick", event => { if (event.button === 1) event.preventDefault(); }, { signal: abort.signal });
+  shell.addEventListener("mousedown", event => {
+    if (event.button === 1) startMiddlePan(event);
+  }, { capture: true, signal: abort.signal });
+  function moveMiddlePan(event) {
+    if ((event.buttons & 4) && !drag?.middle && shell.contains(event.target)) startMiddlePan(event);
+    if (drag?.mode !== "pan" || !drag.middle) return;
+    event.preventDefault();
+    if (!(event.buttons & 4)) { finishPan(); return; }
+    pan.x = drag.x + event.clientX - drag.startX;
+    pan.y = drag.y + event.clientY - drag.startY;
+    transform();
+  }
+  window.addEventListener("pointermove", moveMiddlePan, { capture: true, signal: abort.signal });
+  window.addEventListener("mousemove", moveMiddlePan, { capture: true, signal: abort.signal });
+  window.addEventListener("mouseup", event => {
+    if (event.button === 1 && drag?.middle) { event.preventDefault(); finishPan(); }
+  }, { capture: true, signal: abort.signal });
+  shell.addEventListener("auxclick", event => { if (event.button === 1) event.preventDefault(); }, { capture: true, signal: abort.signal });
   viewport.onpointerdown = (e) => {
     if (e.button !== 0 || e.target.closest(".cvn-image-toolbar")) return;
     if (e.target.closest(".cvn-node") && !panMode) return;
@@ -2497,13 +2521,17 @@ export async function mountStudio(host, id) {
     pan.y = drag.y + e.clientY - drag.startY;
     transform();
   };
-  viewport.onpointerup = () => { finishSelection(); finishPan(); };
+  viewport.onpointerup = event => {
+    finishSelection();
+    if (!drag?.middle || !(event.buttons & 4)) finishPan();
+  };
   viewport.onpointercancel = () => { finishSelection(true); finishPan(); };
   window.addEventListener("blur", () => finishSelection(true), { signal: abort.signal });
   window.addEventListener("blur", finishPan, { signal: abort.signal });
   viewport.addEventListener(
     "wheel",
     (e) => {
+      if (drag?.middle) { e.preventDefault(); return; }
       if (e.target.closest('textarea,video,[contenteditable="true"],.inline-composer,.generation-options-panel,.cvn-image-toolbar')) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08,

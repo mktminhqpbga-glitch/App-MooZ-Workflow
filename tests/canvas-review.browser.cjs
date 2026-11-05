@@ -178,6 +178,24 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     assert.equal(await mode.getAttribute('data-mode'), 'pointer');
     assert.notEqual(await stage.getAttribute('style'), beforePan);
     assert.ok((await stage.getAttribute('style')).includes('scale(0.65)'));
+    // Native mouse presses must pan even over dock controls and when another button is held.
+    for (const target of [mode, page.locator('[data-id="src-v"] .cvn-node-body > video')]) {
+      const box = await target.boundingBox(), before = await stage.getAttribute('style');
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down({ button: 'middle' });
+      await page.mouse.move(box.x + box.width / 2 + 25, box.y + box.height / 2 + 20, { steps: 3 });
+      assert.equal(await mode.getAttribute('data-mode'), 'temporary-hand', 'middle press uses hand over controls/media');
+      await page.mouse.up({ button: 'middle' });
+      assert.notEqual(await stage.getAttribute('style'), before);
+      assert.equal(await mode.getAttribute('data-mode'), 'pointer');
+    }
+    await page.mouse.move(1450, 800); await page.mouse.down();
+    const beforeChord = await stage.getAttribute('style');
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(1480, 825, { steps: 3 });
+    assert.notEqual(await stage.getAttribute('style'), beforeChord, 'middle press works when left button was already held');
+    await page.mouse.up({ button: 'middle' }); await page.mouse.up();
+    assert.equal(await mode.getAttribute('data-mode'), 'pointer');
     const movingSource = page.locator('[data-id="src-a"]');
     await page.evaluate(() => {
       window.reviewImage = document.querySelector('[data-id="src-a"] .cvn-node-body > img');
