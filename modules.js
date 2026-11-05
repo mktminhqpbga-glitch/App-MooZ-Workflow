@@ -282,13 +282,20 @@ export async function mountLibrary(host) {
 }
 export async function mountSettings(host) {
   host.replaceChildren(
-    el("h1", "Kết nối AI"),
+    el("h1", "Cài đặt"),
     el(
       "p",
-      "Ghép MooZ Connect với máy chủ, hoặc sử dụng API được cấu hình riêng.",
+      "Quản lý giao diện, không gian cá nhân và kết nối AI.",
       "intro",
     ),
   );
+  const preferences = el("section", undefined, "settings-panel workspace-preferences"),
+    identity = el("div", undefined, "workspace-identity"),
+    appearanceLink = el("a", "Tùy chỉnh giao diện →", "workspace-appearance-link");
+  identity.append(el("span", "M", "avatar"), el("span", "Không gian cá nhân"));
+  appearanceLink.href = "#appearance";
+  preferences.append(el("h2", "Không gian và giao diện"), identity, appearanceLink);
+  host.append(preferences);
   const panel = el("section", undefined, "settings-panel"),
     status = el("p", "Đang kiểm tra máy chủ…"),
     code = el("textarea");

@@ -276,7 +276,6 @@ document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-route]");
   if (b) location.hash = b.dataset.route;
 });
-$("appearanceIcon").innerHTML = icon("appearance");
 $("mobileMenu").onclick = () => {
   const open = document.querySelector(".sidebar").classList.toggle("open");
   $("mobileBackdrop").hidden = !open;
