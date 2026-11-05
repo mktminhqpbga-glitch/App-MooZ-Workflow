@@ -861,6 +861,64 @@ select {
   color: #d66969;
   background: transparent;
 }
+/* Desktop navigation stays compact and expands over the page on hover/focus. */
+@media (min-width: 701px) {
+  .sidebar {
+    width: 76px;
+    padding-inline: 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    transition: width 180ms ease, box-shadow 180ms ease;
+  }
+  .sidebar:is(:hover, :focus-within) {
+    width: 238px;
+    box-shadow: 12px 0 28px #00000012;
+  }
+  .sidebar .brand {
+    padding-inline: 6px;
+    white-space: nowrap;
+  }
+  .sidebar .brand-mark,
+  .sidebar .nav-link svg,
+  .sidebar .connection i {
+    flex-shrink: 0;
+  }
+  .sidebar .nav-link {
+    min-height: 46px;
+    white-space: nowrap;
+  }
+  .sidebar .brand > span:last-child,
+  .sidebar .nav-link > span,
+  .sidebar .nav-label,
+  .sidebar .connection > span,
+  .sidebar .sidebar-bottom > p {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .sidebar:is(:hover, :focus-within) .brand > span:last-child,
+  .sidebar:is(:hover, :focus-within) .nav-link > span,
+  .sidebar:is(:hover, :focus-within) .nav-label,
+  .sidebar:is(:hover, :focus-within) .connection > span,
+  .sidebar:is(:hover, :focus-within) .sidebar-bottom > p {
+    opacity: 1;
+  }
+  .sidebar .nav-label,
+  .sidebar .sidebar-bottom > p,
+  .sidebar .connection > span {
+    white-space: nowrap;
+  }
+  .sidebar .connection {
+    min-height: 52px;
+    overflow: hidden;
+    padding-inline: 20px;
+  }
+  .sidebar .connection > span:nth-child(2) {
+    min-width: 140px;
+  }
+  .sidebar .nav-link.active::before { left: -12px; }
+  .workspace { margin-left: 76px; }
+  #toast { left: calc(50% + 38px); }
+}
 .project-stats {
   display: flex;
   gap: 40px;

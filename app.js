@@ -195,7 +195,7 @@ function route() {
     .map(
       (m, i) =>
         (i === 5 ? '<div class="nav-divider"></div>' : "") +
-        `<a class="nav-link ${key === m.id ? "active" : ""}" href="#${m.id}" ${key === m.id ? 'aria-current="page"' : ""}>${icon(m.id)}<span>${m.title}</span></a>`,
+        `<a class="nav-link ${key === m.id ? "active" : ""}" href="#${m.id}" aria-label="${m.title}" ${key === m.id ? 'aria-current="page"' : ""}>${icon(m.id)}<span>${m.title}</span></a>`,
     )
     .join("");
   $("main").innerHTML =
