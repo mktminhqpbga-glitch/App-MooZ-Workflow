@@ -66,44 +66,39 @@ const { chromium } = require("playwright"),
     await page.getByRole("button", { name: "Mở Canvas" }).click();
     await page.waitForURL(/#canvas\//);
     await page.locator(".cvn-studio").waitFor();
+    await page.getByLabel("Thêm vào canvas", { exact: true }).click();
+    await page.getByRole("button", { name: "Văn bản", exact: true }).click();
     await page
-      .getByRole("button", { name: "Thêm prompt", exact: true })
-      .click();
-    await page
-      .getByRole("textbox", { name: "Nội dung yêu cầu" })
+      .getByLabel("Nội dung prompt", { exact: true })
       .fill("Đầu vào có kết nối");
-    await page
-      .locator(".cvn-composer")
-      .getByRole("button", { name: "×", exact: true })
-      .click();
+    await page.getByLabel("Thêm vào canvas", { exact: true }).click();
     await page
       .getByRole("button", { name: "Tạo văn bản", exact: true })
       .click();
     await page
-      .getByRole("textbox", { name: "Nội dung yêu cầu" })
+      .getByLabel("Nội dung yêu cầu", { exact: true })
       .fill("Giữ nguyên dữ liệu");
     await page
       .getByLabel("AI thực hiện", { exact: true })
       .selectOption("openai");
+    await page.getByRole("button", { name: "Tham chiếu", exact: true }).click();
+    await page.locator(".inline-chooser").getByRole("button").first().click();
     await page
-      .getByLabel("Nguồn nối", { exact: true })
-      .selectOption({ index: 0 });
-    await page.getByRole("button", { name: "Nối nguồn", exact: true }).click();
-    await page
-      .getByRole("button", { name: "Tạo kết quả ↑", exact: true })
+      .getByRole("button", { name: "Gửi tạo văn bản", exact: true })
       .click();
     await page.getByText("Kết quả kiểm chứng", { exact: true }).waitFor();
-    await page
-      .locator(".cvn-composer")
-      .getByRole("button", { name: "×", exact: true })
-      .click();
-    await page
-      .locator(".cvn-studio input[type=file]")
-      .setInputFiles({
-        name: "Nguon.png",
-        mimeType: "image/png",
-        buffer: Buffer.from(image.split(",")[1], "base64"),
-      });
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Thiết lập", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(await page.locator(".cvn-composer").count(), 0);
+    await page.locator(".cvn-studio > input[type=file]").setInputFiles({
+      name: "Nguon.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(image.split(",")[1], "base64"),
+    });
     await page.locator(".cvn-node img").waitFor();
     await page.getByRole("button", { name: "Vừa khung", exact: true }).click();
     if (process.env.REVIEW_DIR) {

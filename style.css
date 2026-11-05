@@ -1103,67 +1103,6 @@ dialog .project-actions {
   color: var(--muted);
   font-size: 14px;
 }
-.cvn-composer[open] {
-  position: fixed;
-  inset: auto;
-  bottom: 90px;
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
-  width: 720px;
-  max-width: calc(100vw - 24px);
-  max-height: 65vh;
-  overflow: auto;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 20px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  box-shadow: 0 18px 60px #0005;
-}
-.cvn-composer > .section-head,
-.cvn-composer > textarea,
-.cvn-composer > label,
-.cvn-composer > small {
-  width: 100%;
-}
-.cvn-composer textarea {
-  height: 105px;
-  font: inherit;
-  line-height: 1.7;
-  resize: vertical;
-  background: none;
-  color: var(--ink);
-  border: 0;
-  padding: 8px;
-}
-.cvn-composer label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.cvn-composer input {
-  flex: 1;
-  background: transparent;
-  border: 0;
-  color: var(--ink);
-  padding: 4px;
-}
-.cvn-composer select {
-  max-width: 240px;
-  font-size: 12px;
-}
-.cvn-composer button {
-  font-size: 12px;
-}
-.cvn-composer > small {
-  color: var(--muted);
-  margin-top: 12px;
-}
 .library-tabs {
   display: flex;
   gap: 8px;
@@ -1331,9 +1270,7 @@ dialog form > textarea {
     justify-content: space-between;
     gap: 5px;
   }
-  .cvn-composer[open] {
-    max-height: 58vh;
-  }
+
   .cvn-dock button {
     font-size: 11px;
   }
@@ -1358,9 +1295,7 @@ dialog form > textarea {
   .cvn-node {
     width: 300px;
   }
-  .cvn-composer[open] {
-    padding: 14px;
-  }
+
   .cvn-hud {
     left: 10px;
   }
@@ -1370,9 +1305,7 @@ dialog form > textarea {
   .cvn-dock button {
     padding: 7px 9px;
   }
-  .cvn-composer select {
-    max-width: 100%;
-  }
+
   .batch-form select {
     max-width: 100%;
   }
@@ -1386,4 +1319,334 @@ dialog form > textarea {
   --mooz-accent: var(--accent);
   --mooz-accent-ink: var(--accent-ink);
 }
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 28px #0002}.cvn-composer>section{width:100%;display:grid;gap:6px}.cvn-composer>section>button{text-align:left;border:1px solid var(--line)}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px #0002;
+}
+/* Canvas creation is now an attached media + prompt unit. */
+.cvn-node.generation-node {
+  width: 460px;
+}
+.generation-node > .cvn-node-body {
+  min-height: 258px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  background: #242424;
+}
+.generation-node > .cvn-node-body:has(img),
+.generation-node > .cvn-node-body:has(video) {
+  min-height: 0;
+  background: transparent;
+}
+.generation-node > .cvn-node-body > small {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 12px;
+}
+.generation-node > .cvn-node-body > img,
+.generation-node > .cvn-node-body > video {
+  max-height: 430px;
+  border-radius: 12px;
+}
+.generation-node > .cvn-port {
+  top: 118px;
+}
+.inline-composer {
+  margin: 18px -35px 0;
+  width: 530px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 15px 17px;
+  cursor: default;
+  box-shadow: 0 10px 35px #0002;
+}
+.inline-tools {
+  display: flex;
+  gap: 7px;
+}
+.inline-tools > button {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--raised);
+  padding: 7px 10px;
+  border-radius: 8px;
+}
+.inline-composer > textarea {
+  display: block;
+  width: 100%;
+  min-height: 100px;
+  padding: 15px 0;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.8;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+.inline-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+.inline-footer > select {
+  background: transparent;
+  border: 0;
+  padding: 5px 3px;
+  max-width: 175px;
+  font-size: 12px;
+}
+.inline-footer details {
+  position: relative;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.inline-footer summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 5px;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inline-footer details[open] {
+  z-index: 8;
+}
+.inline-footer details > div,
+.inline-connection[open] > select {
+  position: absolute;
+  bottom: 42px;
+  left: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 10px 30px #0005;
+}
+.inline-settings > div {
+  display: flex;
+  gap: 8px;
+  width: 290px;
+}
+.inline-settings select {
+  max-width: 140px;
+}
+.inline-connection > select,
+.inline-connection > button {
+  display: none;
+}
+.inline-connection[open] > select {
+  display: block;
+  width: 230px;
+  max-width: none;
+}
+.inline-connection[open] > button {
+  display: block;
+  position: absolute;
+  right: 0;
+  bottom: 95px;
+  background: var(--raised);
+}
+.inline-send {
+  margin-left: auto !important;
+  width: 40px;
+  height: 40px;
+  padding: 0 !important;
+  font-size: 26px !important;
+  line-height: 1;
+  background: var(--ink) !important;
+  color: var(--bg) !important;
+  border-radius: 12px !important;
+}
+.inline-status {
+  margin: 7px 0 0;
+  padding: 0 !important;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  color: var(--muted);
+}
+.inline-status:empty {
+  display: none;
+}
+.inline-refs {
+  display: flex;
+  gap: 7px;
+  margin-top: 8px;
+}
+.inline-refs:empty {
+  display: none;
+}
+.inline-ref {
+  padding: 0 !important;
+  max-width: 100px;
+  overflow: hidden;
+  font-size: 11px;
+}
+.inline-ref img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.inline-chooser {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 5px;
+  max-height: 180px;
+  overflow: auto;
+}
+.inline-chooser > button {
+  text-align: left;
+  font-size: 12px;
+}
+.inline-chooser > p {
+  font-size: 12px;
+  color: var(--muted);
+}
+.node-more {
+  position: absolute;
+  right: 0;
+  top: -31px;
+  z-index: 6;
+}
+.node-more > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0 8px;
+  font-size: 19px;
+  line-height: 22px;
+}
+.node-more > div {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  width: 155px;
+  display: grid;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px #0004;
+}
+.node-more button {
+  text-align: left;
+  font-size: 12px;
+}
+.dock-add {
+  position: relative;
+}
+.dock-add > summary {
+  list-style: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  font-size: 28px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--bg);
+}
+.dock-add > div {
+  position: absolute;
+  bottom: 53px;
+  left: 0;
+  width: 190px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel);
+  display: grid;
+  box-shadow: 0 12px 35px #0004;
+}
+.dock-add > div button {
+  text-align: left;
+  font-size: 13px;
+}
+.cvn-dock {
+  overflow: visible;
+  gap: 8px;
+}
+.cvn-dock > .dock-selected {
+  background: var(--raised);
+}
+.cvn-resource-sheet[open] {
+  position: fixed;
+  inset: auto 20px 90px auto;
+  max-height: 65vh;
+  overflow: auto;
+  background: var(--panel);
+  color: var(--ink);
+  width: 340px;
+}
+.cvn-resource-sheet > section {
+  display: grid;
+  gap: 6px;
+}
+.cvn-resource-sheet h2 {
+  margin: 15px 0;
+}
+.cvn-resource-sheet > button {
+  font-size: 12px;
+}
+.cvn-context {
+  display: none !important;
+}
+@media (max-width: 700px) {
+  .inline-footer {
+    flex-wrap: wrap;
+  }
+  .inline-footer > select {
+    max-width: 160px;
+  }
+}
+.cvn-project-menu {
+  position: relative;
+}
+.cvn-project-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 8px;
+}
+.cvn-project-menu > div,
+.port-menu {
+  position: absolute;
+  z-index: 12;
+  min-width: 170px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 10px 25px #0004;
+}
+.cvn-project-menu > div {
+  top: 45px;
+  right: 0;
+}
+.port-menu {
+  left: calc(100% + 22px);
+  top: 115px;
+  display: grid;
+}
+.cvn-project-menu button,
+.port-menu button {
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}

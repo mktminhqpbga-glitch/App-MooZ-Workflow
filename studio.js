@@ -1,5 +1,4 @@
 import { exportBundle } from "./core/backup.js";
-import { editImage, captureFrame } from "./media-tools.js";
 import { ProjectRepository, createProject } from "./core/projects.js";
 import { GraphController, nodeTypes } from "./core/graph.js";
 import {
@@ -46,10 +45,13 @@ export async function mountStudio(host, id) {
     failed = false,
     disposed = false,
     pan = { ...project.graph.viewport },
-    currentJob = null,
     drag = null,
     drawFrame = null,
-    wheelSave = null;
+    wheelSave = null,
+    inlineSave = null;
+  const bindings = new Map(),
+    activeJobs = new Map();
+  let panMode = false;
   document.body.classList.add("studio-mode");
   host.classList.add("studio-host");
   host.replaceChildren();
@@ -88,45 +90,79 @@ export async function mountStudio(host, id) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  top.append(cluster, status, backup, settings);
+  const projectMenu = el("details", undefined, "cvn-project-menu"),
+    projectToggle = el("summary", "⌄"),
+    projectOptions = el("div");
+  projectToggle.setAttribute("aria-label", "Menu dự án");
+  projectOptions.append(
+    button("Lưu luồng vào Kho", async () => {
+      await write("templates", {
+        id: crypto.randomUUID(),
+        name: project.name,
+        graph: templateGraph(),
+        createdAt: new Date().toISOString(),
+      });
+      projectMenu.open = false;
+      notice("Đã lưu vào Kho Luồng mẫu");
+    }),
+  );
+  projectMenu.append(projectToggle, projectOptions);
+  cluster.append(projectMenu);
+  projectOptions.prepend(backup);
+  settings.textContent = "";
+  settings.setAttribute("aria-label", "Kết nối AI");
+  settings.title = "Kết nối AI";
+  settings.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M9 4v6M15 14v6"/></svg>';
+  top.append(cluster, status, settings);
   shell.append(top);
   const dock = el("nav", undefined, "panel cvn-dock");
   dock.setAttribute("aria-label", "Công cụ canvas");
-  const types = [
-    ["prompt", "T"],
-    ["imageInput", "▧"],
-    ["videoInput", "▷"],
-    ["generateImage", "Ảnh AI"],
-    ["generateVideo", "Video AI"],
-    ["generateText", "Văn bản AI"],
-  ];
-  for (const [type, label] of types) {
-    const b = button(label, () => addNode(type));
-    b.title = {
-      prompt: "Thêm prompt",
-      imageInput: "Thêm ảnh",
-      videoInput: "Thêm video",
-      generateImage: "Tạo ảnh",
-      generateVideo: "Tạo video",
-      generateText: "Tạo văn bản",
-    }[type];
-    b.setAttribute("aria-label", b.title);
-    dock.append(b);
-  }
-  dock.append(
-    button("↶", () => {
-      controller.undo();
-      render();
-      persist();
-    }),
-    button("↷", () => {
-      controller.redo();
-      render();
-      persist();
-    }),
-    button("Kho", () => showAssets()),
-    button("Hàng đợi", () => showHistory()),
+  const addMenu = el("details", undefined, "dock-add"),
+    addToggle = el("summary", "＋"),
+    addOptions = el("div");
+  addToggle.setAttribute("aria-label", "Thêm vào canvas");
+  for (const [type, label] of [
+    ["generateImage", "Ảnh"],
+    ["generateVideo", "Video"],
+    ["prompt", "Văn bản"],
+    ["generateText", "Tạo văn bản"],
+    ["imageInput", "Tải ảnh"],
+    ["videoInput", "Tải video"],
+  ])
+    addOptions.append(
+      button(label, async () => {
+        addMenu.open = false;
+        await addNode(type);
+      }),
+    );
+  addMenu.append(addToggle, addOptions);
+  const select = button(
+    "",
+    () => {
+      panMode = !panMode;
+      select.setAttribute("aria-pressed", String(!panMode));
+      select.title = panMode ? "Kéo canvas" : "Chọn đối tượng";
+      viewport.style.cursor = panMode ? "grab" : "";
+    },
+    "dock-selected",
   );
+  select.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 7z"/></svg>';
+  select.setAttribute("aria-pressed", "true");
+  select.setAttribute("aria-label", "Chọn đối tượng");
+  dock.append(
+    addMenu,
+    select,
+    button("▧", showAssets),
+    button("◷", showHistory),
+  );
+  dock.children[2].setAttribute("aria-label", "Kho");
+  dock.children[3].setAttribute("aria-label", "Hàng đợi");
+  dock.children[2].innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h7l2 3h9v13H3z"/></svg>';
+  dock.children[3].innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>';
   shell.append(dock);
   const hud = el("div", undefined, "panel cvn-hud"),
     zoom = el("span", "100%");
@@ -158,8 +194,8 @@ export async function mountStudio(host, id) {
   };
   shell.append(files);
   host.append(shell);
-  const editor = el("dialog", undefined, "cvn-composer");
-  editor.setAttribute("aria-label", "Thiết lập node");
+  const editor = el("dialog", undefined, "cvn-resource-sheet");
+  editor.setAttribute("aria-label", "Tài nguyên dự án");
   document.body.append(editor);
   function persist() {
     const graph = controller.snapshot();
@@ -213,8 +249,24 @@ export async function mountStudio(host, id) {
     if (!nodes.length) return;
     const x = Math.min(...nodes.map((n) => n.x)),
       y = Math.min(...nodes.map((n) => n.y)),
-      width = Math.max(...nodes.map((n) => n.x + 340)) - x,
-      height = Math.max(...nodes.map((n) => n.y + 330)) - y;
+      width =
+        Math.max(
+          ...nodes.map(
+            (n) =>
+              n.x +
+              (stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`)
+                ?.offsetWidth || 340),
+          ),
+        ) - x,
+      height =
+        Math.max(
+          ...nodes.map(
+            (n) =>
+              n.y +
+              (stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`)
+                ?.offsetHeight || 330),
+          ),
+        ) - y;
     pan.zoom = Math.max(
       0.1,
       Math.min(1, (innerWidth - 140) / width, (innerHeight - 230) / height),
@@ -225,7 +277,7 @@ export async function mountStudio(host, id) {
     controller.execute({ type: "setViewport", viewport: pan });
     void persist();
   }
-  async function addNode(type) {
+  async function addNode(type, sourceId = null) {
     if (type === "imageInput" || type === "videoInput") {
       files.accept = type === "imageInput" ? "image/*" : "video/*";
       files.click();
@@ -234,7 +286,7 @@ export async function mountStudio(host, id) {
     const n = {
       id: crypto.randomUUID(),
       type,
-      x: Math.max(-240, ...controller.snapshot().nodes.map((n) => n.x)) + 440,
+      x: Math.max(-240, ...controller.snapshot().nodes.map((n) => n.x)) + 660,
       y: 160,
       data: {
         customName: {
@@ -250,6 +302,30 @@ export async function mountStudio(host, id) {
       },
     };
     command({ type: "addNode", node: n });
+    if (sourceId) {
+      const source = controller
+        .snapshot()
+        .nodes.find((row) => row.id === sourceId);
+      const pair = Object.entries(nodeTypes[source.type].outputs)
+        .map(([port, type]) => ({
+          port,
+          target: Object.entries(nodeTypes[n.type].inputs).find(
+            ([, input]) => input === type,
+          ),
+        }))
+        .find((pair) => pair.target);
+      if (pair)
+        command({
+          type: "connect",
+          edge: {
+            id: crypto.randomUUID(),
+            source: sourceId,
+            sourcePort: pair.port,
+            target: n.id,
+            targetPort: pair.target[0],
+          },
+        });
+    }
     selection = new Set([n.id]);
     render();
     fit();
@@ -259,7 +335,7 @@ export async function mountStudio(host, id) {
     const n = {
       id: crypto.randomUUID(),
       type: a.kind === "video" ? "videoInput" : "imageInput",
-      x: Math.max(-300, ...controller.snapshot().nodes.map((n) => n.x)) + 440,
+      x: Math.max(-300, ...controller.snapshot().nodes.map((n) => n.x)) + 660,
       y: 160,
       data: { customName: a.name, assetId: a.id },
     };
@@ -338,23 +414,95 @@ export async function mountStudio(host, id) {
           });
         body.append(text);
       } else if (n.type === "generateText" && n.data.text) {
-        body.append(
-          el("p", n.data.text),
-          button("Thiết lập", () => openEditor(n.id)),
-        );
+        body.append(el("p", n.data.text));
       } else {
         body.append(
-          el("span", n.type === "preview" ? "▷" : "✧", "cvn-empty-symbol"),
-          el("p", n.data.studioPrompt || "Chọn để nhập yêu cầu và nối nguồn."),
+          el(
+            "span",
+            n.type === "generateVideo" ? "▷" : "▧",
+            "cvn-empty-symbol",
+          ),
+          el(
+            "small",
+            n.type === "generateVideo"
+              ? "Video của bạn sẽ xuất hiện ở đây"
+              : "Ảnh của bạn sẽ xuất hiện ở đây",
+          ),
         );
-        body.append(button("Thiết lập", () => openEditor(n.id)));
+      }
+      if (n.type.startsWith("generate")) {
+        card.classList.add("generation-node");
+        card.append(makeComposer(n));
       }
       if (!card.isConnected) stage.append(card);
+      const more = el("details", undefined, "node-more"),
+        toggle = el("summary", "⋯");
+      toggle.setAttribute("aria-label", "Thao tác node");
+      const menu = el("div");
+      menu.append(
+        button("Nhân bản", () =>
+          command({
+            type: "addNode",
+            node: {
+              ...controller.snapshot().nodes.find((row) => row.id === n.id),
+              id: crypto.randomUUID(),
+              x: n.x + 660,
+              y: n.y,
+            },
+          }),
+        ),
+        button("Lưu prompt", async () => {
+          await write("prompts", {
+            id: crypto.randomUUID(),
+            name: n.data.customName || "Prompt",
+            text:
+              controller.snapshot().nodes.find((row) => row.id === n.id).data
+                .studioPrompt ||
+              n.data.text ||
+              "",
+            createdAt: new Date().toISOString(),
+          });
+          notice("Đã lưu vào Kho Prompt");
+        }),
+        button("Xóa", () => command({ type: "deleteNode", id: n.id })),
+      );
+      more.append(toggle, menu);
+      card.append(more);
       for (const side of ["input", "output"]) {
         const ports =
           nodeTypes[n.type][side === "input" ? "inputs" : "outputs"];
         if (Object.keys(ports).length) {
-          const p = button("+", () => openEditor(n.id), "cvn-port " + side);
+          const p = button(
+            "+",
+            () => {
+              if (side === "input" && n.type.startsWith("generate")) {
+                card
+                  .querySelector(".inline-tools button:nth-child(2)")
+                  ?.click();
+              } else {
+                const old = card.querySelector(".port-menu");
+                if (old) {
+                  old.remove();
+                  return;
+                }
+                const menu = el("div", undefined, "port-menu");
+                for (const [type, label] of [
+                  ["generateImage", "Tạo ảnh"],
+                  ["generateVideo", "Tạo video"],
+                ]) {
+                  const accepted = Object.values(nodeTypes[type].inputs);
+                  if (
+                    Object.values(nodeTypes[n.type].outputs).some((output) =>
+                      accepted.includes(output),
+                    )
+                  )
+                    menu.append(button(label, () => addNode(type, n.id)));
+                }
+                card.append(menu);
+              }
+            },
+            "cvn-port " + side,
+          );
           p.title = Object.keys(ports).join(", ");
           p.setAttribute(
             "aria-label",
@@ -365,7 +513,13 @@ export async function mountStudio(host, id) {
         }
       }
       card.onpointerdown = (e) => {
-        if (e.target.closest("button,textarea,video,audio")) return;
+        if (panMode) return;
+        if (
+          e.target.closest(
+            "button,textarea,video,audio,input,select,summary,.inline-composer",
+          )
+        )
+          return;
         if (e.shiftKey) {
           selection.has(n.id) ? selection.delete(n.id) : selection.add(n.id);
         } else if (!selection.has(n.id)) selection = new Set([n.id]);
@@ -422,7 +576,8 @@ export async function mountStudio(host, id) {
         render();
       };
       card.ondblclick = (e) => {
-        if (!e.target.closest("textarea,video,button")) openEditor(n.id);
+        if (!e.target.closest("textarea,video,button,input,select,summary"))
+          openEditor(n.id);
       };
     }
     renderContext();
@@ -452,10 +607,14 @@ export async function mountStudio(host, id) {
       const a = stage.querySelector(`[data-id="${CSS.escape(e.source)}"]`),
         b = stage.querySelector(`[data-id="${CSS.escape(e.target)}"]`);
       if (!a || !b) continue;
-      const x = a.offsetLeft + 340,
-        y = a.offsetTop + Math.min(a.offsetHeight / 2, 150),
+      const x = a.offsetLeft + a.offsetWidth,
+        y =
+          a.offsetTop +
+          (a.querySelector(".cvn-node-body")?.offsetHeight || 240) / 2,
         tx = b.offsetLeft,
-        ty = b.offsetTop + Math.min(b.offsetHeight / 2, 150),
+        ty =
+          b.offsetTop +
+          (b.querySelector(".cvn-node-body")?.offsetHeight || 240) / 2,
         path = document.createElementNS(wires.namespaceURI, "path");
       path.setAttribute(
         "d",
@@ -465,220 +624,265 @@ export async function mountStudio(host, id) {
     }
   }
   function renderContext() {
+    context.hidden = true;
     context.replaceChildren();
-    const ids = [...selection];
-    context.hidden = !ids.length;
-    if (!ids.length) return;
-    if (ids.length === 1) {
-      const n = controller.snapshot().nodes.find((n) => n.id === ids[0]);
-      if (n?.data.assetId) {
-        context.append(
-          button("Tải xuống", async () => {
-            const a = await readAsset(n.data.assetId);
-            if (!a) throw Error("Tài sản đã bị xóa.");
-            const link = el("a");
-            link.href = URL.createObjectURL(a.blob);
-            link.download = a.name;
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-          }),
-          button("Chỉnh media", async () => {
-            const a = await readAsset(n.data.assetId);
-            if (!a) throw Error("Tài sản đã bị xóa.");
-            if (a.kind === "image")
-              return editImage(a, (output) => {
-                if (!disposed) void addAssetNode(output);
-              });
-            if (a.kind === "video") {
-              const video = stage.querySelector(
-                `[data-id="${CSS.escape(n.id)}"] video`,
-              );
-              const output = await captureFrame(a, video?.currentTime || 0);
-              await addAssetNode(output);
-            }
-          }),
-        );
-      }
-    }
-    context.append(
-      el("span", ids.length === 1 ? "Đối tượng đã chọn" : ids.length + " node"),
-    );
-    if (ids.length === 1)
-      context.append(button("Thiết lập", () => openEditor(ids[0])));
-    context.append(
-      button("Nhân bản", () => {
-        for (const id of ids) {
-          const n = controller.snapshot().nodes.find((n) => n.id === id);
-          command({
-            type: "addNode",
-            node: { ...n, id: crypto.randomUUID(), x: n.x + 50, y: n.y + 50 },
-          });
-        }
-      }),
-      button("Nhóm", () => command({ type: "group", ids })),
-      button("Lưu luồng", async () => {
-        await write("templates", {
-          id: crypto.randomUUID(),
-          name: project.name + " · Luồng",
-          graph: templateGraph(),
-          createdAt: new Date().toISOString(),
-        });
-        notice("Đã lưu vào Kho → Luồng mẫu");
-      }),
-      button("Xóa", () => {
-        for (const id of ids) command({ type: "deleteNode", id });
-        selection.clear();
-        render();
-      }),
-    );
   }
-  async function openEditor(id) {
-    const n = controller.snapshot().nodes.find((n) => n.id === id);
-    if (!n) return;
-    editor.replaceChildren();
-    editor.dataset.nodeId = id;
-    const head = el("div", undefined, "section-head");
-    head.append(
-      el("strong", n.data.customName || n.type),
-      button("×", () => editor.close()),
+  function updateInline(id, patch) {
+    if (failed)
+      throw Error("Dự án có xung đột. Hãy sao lưu trước khi tải lại.");
+    controller.execute({ type: "updateNode", id, patch });
+    clearTimeout(inlineSave);
+    inlineSave = setTimeout(() => void persist(), 180);
+  }
+  function openEditor(id) {
+    const card = stage.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    card?.querySelector("textarea")?.focus({ preventScroll: true });
+  }
+  function makeComposer(n) {
+    const id = n.id,
+      kind =
+        n.type === "generateImage"
+          ? "image"
+          : n.type === "generateVideo"
+            ? "video"
+            : "text";
+    const composer = el("section", undefined, "inline-composer");
+    composer.setAttribute(
+      "aria-label",
+      "Prompt " + (n.data.customName || n.type),
     );
-    editor.append(head);
-    const label = el("label", "Tên"),
-      title = el("input");
-    title.value = n.data.customName || n.type;
-    title.onchange = () =>
-      command({ type: "updateNode", id, patch: { customName: title.value } });
-    label.append(title);
-    editor.append(label);
-    if (n.type === "prompt" || n.type.startsWith("generate")) {
-      const text = el("textarea");
-      text.setAttribute("aria-label", "Nội dung yêu cầu");
-      text.placeholder = "Mô tả nội dung bạn muốn tạo…";
-      text.value =
-        n.type === "prompt" ? n.data.text || "" : n.data.studioPrompt || "";
-      text.onchange = () =>
-        command({
-          type: "updateNode",
-          id,
-          patch: {
-            [n.type === "prompt" ? "text" : "studioPrompt"]: text.value,
-          },
-        });
-      editor.append(text);
-      editor.append(
-        button("Lưu prompt vào Kho", async () => {
-          await write("prompts", {
+    const tools = el("div", undefined, "inline-tools"),
+      refs = el("div", undefined, "inline-refs"),
+      chooser = el("section", undefined, "inline-chooser");
+    chooser.hidden = true;
+    const upload = el("input");
+    upload.type = "file";
+    upload.accept = "image/*";
+    upload.multiple = true;
+    upload.hidden = true;
+    upload.onchange = async () => {
+      try {
+        for (const file of upload.files) {
+          const asset = await addAsset(file, { projectId: project.id });
+          const source = {
             id: crypto.randomUUID(),
-            name: title.value,
-            text: text.value,
-            createdAt: new Date().toISOString(),
-          });
-          notice("Đã lưu vào Kho → Prompt");
-        }),
-      );
-    }
-    if (n.type.startsWith("generate")) {
-      const kind =
-          n.type === "generateText"
-            ? "text"
-            : n.type === "generateImage"
-              ? "image"
-              : "video",
-        provider = el("select"),
-        tabs = el("select"),
-        ratio = el("select"),
-        duration = el("select");
-      provider.setAttribute("aria-label", "AI thực hiện");
-      tabs.setAttribute("aria-label", "Tab chạy luồng");
-      for (const p of providerList.filter((p) => p.types.includes(kind)))
-        provider.add(new Option(p.name, p.id));
-      provider.value = n.data.provider || "muse";
-      for (const r of ["16:9", "9:16", "1:1", "4:3", "3:4"])
-        ratio.add(new Option(r, r));
-      ratio.value = n.data.size || "16:9";
-      for (const d of [5, 10, 15, 30, 40])
-        duration.add(new Option(d + " giây", d));
-      duration.value = String(n.data.duration || 5);
-      duration.hidden = kind !== "video";
-      ratio.onchange = () =>
-        command({ type: "updateNode", id, patch: { size: ratio.value } });
-      duration.onchange = () =>
-        command({
-          type: "updateNode",
-          id,
-          patch: { duration: Number(duration.value) },
-        });
-      async function refresh() {
-        tabs.replaceChildren(new Option("Chọn tab AI…", ""));
-        try {
-          if (!["google", "openai"].includes(provider.value))
-            for (const t of await api("tabs?provider=" + provider.value)) {
-              const o = new Option(t.title || t.url, t.id);
-              o.dataset.url = t.url;
-              tabs.add(o);
-            }
-        } catch (e) {
-          notice(e.message);
-        }
-      }
-      provider.onchange = () => {
-        command({
-          type: "updateNode",
-          id,
-          patch: { provider: provider.value },
-        });
-        void refresh();
-      };
-      editor.append(
-        provider,
-        ratio,
-        duration,
-        tabs,
-        button("Làm mới tab", refresh),
-        button("Tạo kết quả ↑", async () => {
-          await saving;
-          const graph = controller.snapshot(),
-            required = new Set([id]);
-          let changed = true;
-          while (changed) {
-            changed = false;
-            for (const e of graph.edges)
-              if (required.has(e.target) && !required.has(e.source)) {
-                required.add(e.source);
-                changed = true;
-              }
-          }
-          const subset = {
-            ...graph,
-            nodes: graph.nodes.filter((n) => required.has(n.id)),
-            edges: graph.edges.filter(
-              (e) => required.has(e.source) && required.has(e.target),
-            ),
-            groups: [],
+            type: "imageInput",
+            x: n.x - 650,
+            y: n.y,
+            data: { customName: asset.name, assetId: asset.id },
           };
-          const job = await createJob({
-            projectId: project.id,
-            graph: subset,
-            provider: provider.value,
-            tabId: tabs.value ? Number(tabs.value) : null,
-            chatURL: tabs.selectedOptions[0]?.dataset.url || null,
-            title: project.name,
+          controller.execute({ type: "addNode", node: source });
+          controller.execute({
+            type: "connect",
+            edge: {
+              id: crypto.randomUUID(),
+              source: source.id,
+              sourcePort: "image",
+              target: id,
+              targetPort: "reference",
+            },
           });
-          currentJob = job.id;
+        }
+        render();
+        await persist();
+      } catch (e) {
+        notice(e.message);
+      }
+    };
+    tools.append(
+      button("＋ Tải lên", () => upload.click()),
+      button("Tham chiếu", () => {
+        chooser.hidden = !chooser.hidden;
+        if (!chooser.hidden) fillChooser();
+      }),
+      upload,
+    );
+    const text = el("textarea");
+    text.value = n.data.studioPrompt || "";
+    text.placeholder =
+      kind === "video"
+        ? "Mô tả chuyển động, cảnh quay và nội dung video…"
+        : "Mô tả hình ảnh bạn muốn tạo…";
+    text.setAttribute("aria-label", "Nội dung yêu cầu");
+    text.maxLength = 50000;
+    text.oninput = () => updateInline(id, { studioPrompt: text.value });
+    const footer = el("div", undefined, "inline-footer"),
+      provider = el("select"),
+      settings = el("details", undefined, "inline-settings"),
+      summary = el("summary"),
+      settingsBody = el("div"),
+      ratio = el("select"),
+      duration = el("select"),
+      connection = el("details", undefined, "inline-connection"),
+      tabSummary = el("summary", "Tab AI"),
+      tabs = el("select"),
+      hint = el("p", undefined, "inline-status");
+    provider.setAttribute("aria-label", "AI thực hiện");
+    for (const p of providerList.filter((p) => p.types.includes(kind)))
+      provider.add(new Option(p.name, p.id));
+    provider.value = n.data.provider || "muse";
+    ratio.setAttribute("aria-label", "Tỷ lệ");
+    for (const r of ["16:9", "9:16", "1:1", "4:3", "3:4"])
+      ratio.add(new Option(r, r));
+    ratio.value = n.data.size || "16:9";
+    duration.setAttribute("aria-label", "Thời lượng");
+    for (const d of [5, 10, 15, 30, 40])
+      duration.add(new Option(d + " giây", d));
+    duration.value = String(n.data.duration || 5);
+    duration.hidden = kind !== "video";
+    const refreshSummary = () =>
+      (summary.textContent =
+        ratio.value +
+        (kind === "video" ? " · " + duration.value + "s" : "") +
+        " ⌄");
+    refreshSummary();
+    ratio.onchange = () => {
+      updateInline(id, { size: ratio.value });
+      refreshSummary();
+    };
+    duration.onchange = () => {
+      updateInline(id, { duration: Number(duration.value) });
+      refreshSummary();
+    };
+    settingsBody.append(ratio, duration);
+    settings.append(summary, settingsBody);
+    settings.hidden = kind === "text";
+    tabs.setAttribute("aria-label", "Tab chạy luồng");
+    tabs.add(new Option("Chọn tab AI…", ""));
+    connection.append(
+      tabSummary,
+      tabs,
+      button("↻", () => refreshTabs()),
+    );
+    const binding = bindings.get(id);
+    if (binding?.provider === provider.value) {
+      const o = new Option(binding.title, binding.id);
+      o.dataset.url = binding.url;
+      tabs.add(o);
+      tabs.value = String(binding.id);
+      tabSummary.textContent = binding.title;
+    }
+    let tabRevision = 0;
+    async function refreshTabs() {
+      const seq = ++tabRevision,
+        value = provider.value;
+      tabs.disabled = true;
+      try {
+        const available = await api("tabs?provider=" + value);
+        if (!composer.isConnected || seq !== tabRevision) return;
+        tabs.replaceChildren(new Option("Chọn tab AI…", ""));
+        for (const t of available) {
+          const o = new Option(t.title || t.url, t.id);
+          o.dataset.url = t.url;
+          tabs.add(o);
+        }
+        const saved = bindings.get(id);
+        if (saved?.provider === value) {
+          if (!available.some((t) => t.id === saved.id)) {
+            const offline = new Option("Tab đã chọn · ngoại tuyến", saved.id);
+            offline.dataset.url = saved.url;
+            offline.disabled = true;
+            tabs.add(offline);
+          }
+          tabs.value = String(saved.id);
+        }
+        hint.textContent = available.length
+          ? ""
+          : "Chưa có tab kết nối. Mở Kết nối AI ở góc trên.";
+      } catch (e) {
+        if (composer.isConnected && seq === tabRevision)
+          hint.textContent = e.message;
+      } finally {
+        if (seq === tabRevision) tabs.disabled = false;
+      }
+    }
+    connection.ontoggle = () => {
+      if (connection.open) void refreshTabs();
+    };
+    tabs.onchange = () => {
+      const o = tabs.selectedOptions[0];
+      if (tabs.value)
+        bindings.set(id, {
+          id: Number(tabs.value),
+          url: o.dataset.url,
+          title: o.textContent,
+          provider: provider.value,
+        });
+      else bindings.delete(id);
+      tabSummary.textContent = o?.textContent || "Tab AI";
+    };
+    provider.onchange = () => {
+      updateInline(id, { provider: provider.value });
+      bindings.delete(id);
+      tabs.replaceChildren(new Option("Chọn tab AI…", ""));
+      tabSummary.textContent = "Tab AI";
+      connection.hidden = ["openai", "google"].includes(provider.value);
+      if (!connection.hidden && connection.open) void refreshTabs();
+    };
+    connection.hidden = ["openai", "google"].includes(provider.value);
+    const send = button(
+      "↑",
+      async () => {
+        if (activeJobs.has(id)) return stopJob(activeJobs.get(id));
+        updateInline(id, {
+          studioPrompt: text.value,
+          provider: provider.value,
+          size: ratio.value,
+          ...(kind === "video" ? { duration: Number(duration.value) } : {}),
+        });
+        clearTimeout(inlineSave);
+        await persist();
+        const graph = controller.snapshot(),
+          required = new Set([id]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const edge of graph.edges)
+            if (required.has(edge.target) && !required.has(edge.source)) {
+              required.add(edge.source);
+              changed = true;
+            }
+        }
+        const subset = {
+          ...graph,
+          nodes: graph.nodes.filter((n) => required.has(n.id)),
+          edges: graph.edges.filter(
+            (e) => required.has(e.source) && required.has(e.target),
+          ),
+          groups: [],
+        };
+        const b = bindings.get(id);
+        const job = await createJob({
+          projectId: project.id,
+          graph: subset,
+          provider: provider.value,
+          tabId: b?.provider === provider.value ? b.id : null,
+          chatURL: b?.provider === provider.value ? b.url : null,
+          title: n.data.customName || project.name,
+          kind,
+        });
+        activeJobs.set(id, job.id);
+        send.disabled = false;
+        send.textContent = "■";
+        send.setAttribute("aria-label", "Dừng tạo");
+        try {
           const result = await startJob(job.id, (j) => {
-            status.textContent =
+            const message =
               {
                 queued: "Chờ lượt",
                 preparing: "Chuẩn bị",
-                sent: "Đang chờ AI",
-                receiving: "Đang nhận kết quả",
-                success: "Hoàn tất",
-                unknown: "Cần đối chiếu",
+                sent: "Đang chờ AI…",
+                receiving: "Nhận kết quả",
+                success: "Đã tạo xong",
+                unknown: "Cần kiểm tra kết quả",
                 error: "Có lỗi",
               }[j.status] || j.status;
+            hint.textContent = message;
+            status.textContent = message;
           });
           if (result.status !== "success") {
-            notice(result.error || "Tác vụ chưa hoàn tất.");
+            hint.textContent = result.error || "Tác vụ chưa hoàn tất.";
+            notice(hint.textContent);
             return;
           }
           for (const [nodeId, output] of Object.entries(result.outputs))
@@ -687,89 +891,123 @@ export async function mountStudio(host, id) {
                 .find((n) => n.id === nodeId)
                 ?.type.startsWith("generate")
             ) {
-              if (output.assetId)
-                command({
-                  type: "updateNode",
-                  id: nodeId,
-                  patch: { assetId: output.assetId },
-                });
-              else if (output.text)
-                command({
-                  type: "updateNode",
-                  id: nodeId,
-                  patch: { text: output.text },
-                });
+              controller.execute({
+                type: "updateNode",
+                id: nodeId,
+                patch: output.assetId
+                  ? { assetId: output.assetId }
+                  : { text: output.text },
+              });
             }
-          notice("Đã nhận và lưu kết quả");
-        }),
-        button("Dừng", () => currentJob && stopJob(currentJob)),
+          activeJobs.delete(id);
+          await persist();
+          render();
+        } finally {
+          activeJobs.delete(id);
+          send.textContent = "↑";
+          send.setAttribute(
+            "aria-label",
+            kind === "video" ? "Tạo video" : "Tạo ảnh",
+          );
+        }
+      },
+      "inline-send",
+    );
+    send.setAttribute(
+      "aria-label",
+      kind === "video"
+        ? "Gửi tạo video"
+        : kind === "image"
+          ? "Gửi tạo ảnh"
+          : "Gửi tạo văn bản",
+    );
+    text.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        send.click();
+      }
+    });
+    tools.firstElementChild.disabled = kind === "text";
+    footer.append(provider, settings, connection, send);
+    composer.append(tools, refs, chooser, text, footer, hint);
+    const incoming = controller.snapshot().edges.filter((e) => e.target === id);
+    for (const edge of incoming) {
+      const source = controller
+        .snapshot()
+        .nodes.find((n) => n.id === edge.source);
+      const chip = button(
+        source?.data.customName || "Nguồn",
+        () => {
+          chooser.hidden = false;
+          fillChooser();
+        },
+        "inline-ref",
       );
-      void refresh();
+      if (source?.data.assetId) {
+        chip.textContent = "";
+        const preview = el("span");
+        chip.append(preview);
+        void (async () => {
+          const asset = await readAsset(source.data.assetId);
+          if (asset?.kind === "image" && preview.isConnected) {
+            let url = urls.get(asset.id);
+            if (!url) {
+              url = URL.createObjectURL(asset.blob);
+              urls.set(asset.id, url);
+            }
+            const img = el("img");
+            img.src = url;
+            img.alt = asset.name;
+            preview.append(img);
+          }
+        })();
+      }
+      refs.append(chip);
     }
-    const graph = controller.snapshot(),
-      sources = el("select"),
-      inputs = el("select");
-    sources.setAttribute("aria-label", "Nguồn nối");
-    inputs.setAttribute("aria-label", "Cổng đầu vào");
-    for (const source of graph.nodes.filter((s) => s.id !== id))
-      for (const port of Object.keys(nodeTypes[source.type].outputs))
-        sources.add(
-          new Option(
-            (source.data.customName || source.type) + " · " + port,
-            source.id + "|" + port,
-          ),
+    function fillChooser() {
+      chooser.replaceChildren();
+      const graph = controller.snapshot();
+      for (const source of graph.nodes.filter((s) => s.id !== id))
+        for (const [port, type] of Object.entries(
+          nodeTypes[source.type].outputs,
+        )) {
+          const target = Object.entries(nodeTypes[n.type].inputs).find(
+            ([, t]) => t === type,
+          );
+          if (!target) continue;
+          const exists = graph.edges.find(
+            (e) =>
+              e.source === source.id &&
+              e.sourcePort === port &&
+              e.target === id &&
+              e.targetPort === target[0],
+          );
+          chooser.append(
+            button(
+              (exists ? "✓ " : "＋ ") + (source.data.customName || source.type),
+              () => {
+                if (exists) command({ type: "disconnect", id: exists.id });
+                else
+                  command({
+                    type: "connect",
+                    edge: {
+                      id: crypto.randomUUID(),
+                      source: source.id,
+                      sourcePort: port,
+                      target: id,
+                      targetPort: target[0],
+                    },
+                  });
+              },
+            ),
+          );
+        }
+      if (!chooser.childNodes.length)
+        chooser.append(
+          el("p", "Thêm ảnh hoặc văn bản vào canvas để dùng làm nguồn."),
         );
-    for (const port of Object.keys(nodeTypes[n.type].inputs))
-      inputs.add(new Option(port, port));
-    if (inputs.options.length) {
-      editor.append(
-        el("small", "Nguồn tham chiếu và dây nối"),
-        sources,
-        inputs,
-        button("Nối nguồn", () => {
-          const [source, sourcePort] = sources.value.split("|");
-          command({
-            type: "connect",
-            edge: {
-              id: crypto.randomUUID(),
-              source,
-              sourcePort,
-              target: id,
-              targetPort: inputs.value,
-            },
-          });
-          openEditor(id);
-        }),
-      );
-      for (const edge of graph.edges.filter((e) => e.target === id))
-        editor.append(
-          button(
-            "Bỏ dây: " +
-              (graph.nodes.find((n) => n.id === edge.source)?.data.customName ||
-                edge.sourcePort),
-            () => {
-              command({ type: "disconnect", id: edge.id });
-              openEditor(id);
-            },
-          ),
-        );
     }
-    if (!editor.open) editor.show();
-    const target = stage.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    if (target && innerWidth > 800) {
-      const r = target.getBoundingClientRect(),
-        width = Math.min(720, innerWidth - 32),
-        height = editor.offsetHeight;
-      editor.style.bottom = "auto";
-      editor.style.transform = "none";
-      editor.style.left =
-        Math.max(
-          16,
-          Math.min(innerWidth - width - 16, r.left + r.width / 2 - width / 2),
-        ) + "px";
-      editor.style.top =
-        Math.max(80, Math.min(innerHeight - height - 90, r.bottom + 20)) + "px";
-    }
+    return composer;
   }
   function templateGraph() {
     const graph = controller.snapshot();
@@ -865,7 +1103,7 @@ export async function mountStudio(host, id) {
   }
 
   viewport.onpointerdown = (e) => {
-    if (e.target.closest(".cvn-node")) return;
+    if (e.target.closest(".cvn-node") && !panMode) return;
     selection.clear();
     renderContext();
     drag = {
@@ -940,6 +1178,7 @@ export async function mountStudio(host, id) {
   return () => {
     disposed = true;
     clearTimeout(wheelSave);
+    clearTimeout(inlineSave);
     if (drawFrame) cancelAnimationFrame(drawFrame);
     abort.abort();
     editor.remove();
