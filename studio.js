@@ -3,10 +3,13 @@ import { availableImageTools } from "./core/capabilities.js";
 import { icon } from "./icons.js";
 import { openImageTool } from "./image-workbench.js";
 import { createVideoPrompt } from "./video-prompt.js";
+import { createCanvasMenu } from "./canvas-menu.js";
+import { createCanvasNavigation } from "./canvas-navigation.js";
+import { openCharacterLibrary, openProjectAssetLibrary } from "./canvas-libraries.js";
 import { captureFrame } from "./media-tools.js";
 import { exportBundle } from "./core/backup.js";
 import { ProjectRepository, createProject, exportProject } from "./core/projects.js";
-import { GraphController, nodeTypes } from "./core/graph.js";
+import { GraphController, nodeTypes, topologicalOrder } from "./core/graph.js";
 import {
   addAsset,
   readAsset,
@@ -196,6 +199,7 @@ export async function mountStudio(host, id) {
   const bindings = new Map(),
     activeJobs = new Map(),
     batches = new Map();
+  let canvasNavigation = null;
   let panMode = false,
     connectionCapabilities = null,
     pendingLink = null,
@@ -279,20 +283,40 @@ export async function mountStudio(host, id) {
     addToggle = el("summary", "＋"),
     addOptions = el("div");
   addToggle.setAttribute("aria-label", "Thêm vào canvas");
-  for (const [type, label] of [
-    ["generateImage", "Ảnh"],
-    ["generateVideo", "Video"],
-    ["prompt", "Văn bản"],
-    ["generateText", "Tạo văn bản"],
-    ["imageInput", "Tải ảnh"],
-    ["videoInput", "Tải video"],
-  ])
-    addOptions.append(
-      button(label, async () => {
-        addMenu.open = false;
-        await addNode(type);
-      }),
-    );
+  addOptions.classList.add("dock-add-panel");
+  const addHeading = el("div", undefined, "dock-add-heading"), addSearch = el("input");
+  addHeading.append(el("span", "Thêm node"), icon("search"));
+  addSearch.type = "search";
+  addSearch.placeholder = "Tìm loại node…";
+  addSearch.setAttribute("aria-label", "Tìm loại node");
+  addOptions.append(addHeading, addSearch);
+  for (const [type, label, glyph] of [
+    ["prompt", "Văn bản", "text"], ["generateText", "Kịch bản", "sparkles"],
+    ["generateImage", "Ảnh", "image"], ["generateVideo", "Video", "video"],
+  ]) {
+    const item = button("", async () => { addMenu.open = false; await addNode(type); });
+    item.append(icon(glyph), el("span", label));
+    item.dataset.search = label.toLocaleLowerCase("vi");
+    addOptions.append(item);
+  }
+  addOptions.append(el("hr"), el("span", "Thêm tài nguyên", "dock-add-section"));
+  for (const [label, glyph, action] of [
+    ["Tải lên", "upload", () => { files.accept = "image/*,video/*"; files.click(); }],
+    ["Chọn từ lịch sử tạo", "clock", () => showHistory()],
+  ]) {
+    const item = button("", () => { addMenu.open = false; return action(); });
+    item.append(icon(glyph), el("span", label));
+    item.dataset.search = label.toLocaleLowerCase("vi");
+    addOptions.append(item);
+  }
+  addSearch.oninput = () => {
+    const query = addSearch.value.trim().toLocaleLowerCase("vi");
+    for (const item of addOptions.querySelectorAll("button")) item.hidden = !item.dataset.search.includes(query);
+  };
+  addMenu.onpointerenter = event => { if (event.pointerType !== "touch") addMenu.open = true; };
+  addMenu.onpointerleave = event => { if (event.pointerType !== "touch") addMenu.open = false; };
+  addToggle.onclick = event => { event.preventDefault(); addMenu.open = true; };
+  addMenu.ontoggle = () => { addToggle.textContent = addMenu.open ? "×" : "＋"; };
   addMenu.append(addToggle, addOptions);
   const select = button(
     "",
@@ -366,6 +390,103 @@ export async function mountStudio(host, id) {
   const editor = el("dialog", undefined, "cvn-resource-sheet");
   editor.setAttribute("aria-label", "Tài nguyên dự án");
   document.body.append(editor);
+  let dockAnchor = null, dockHoverId = 0, activeInlinePopup = null;
+  function positionInlinePopup() {
+    if (!activeInlinePopup || !editor.open || !activeInlinePopup.anchor.isConnected) return;
+    const anchor = activeInlinePopup.anchor.getBoundingClientRect();
+    editor.classList.add("inline-resource-popover");
+    editor.style.inset = "auto";
+    editor.style.margin = "0";
+    editor.style.transform = "none";
+    editor.style.left = Math.max(12, Math.min(anchor.left + anchor.width / 2 - editor.offsetWidth / 2, innerWidth - editor.offsetWidth - 12)) + "px";
+    editor.style.top = Math.max(12, anchor.top - editor.offsetHeight - 12) + "px";
+  }
+  function bindInlinePopup(control, action) {
+    control.setAttribute("aria-expanded", "false");
+    control.onclick = event => {
+      if (event.detail > 1) return;
+      if (activeInlinePopup?.anchor === control && editor.open) { editor.close(); return; }
+      closeDockPopup();
+      if (activeInlinePopup) activeInlinePopup.anchor.setAttribute("aria-expanded", "false");
+      activeInlinePopup = { anchor: control };
+      control.setAttribute("aria-expanded", "true");
+      Promise.resolve(action()).then(() => { positionInlinePopup(); requestAnimationFrame(positionInlinePopup); }).catch(error => notice(error.message));
+    };
+  }
+  editor.addEventListener("close", () => {
+    if (activeInlinePopup) activeInlinePopup.anchor.setAttribute("aria-expanded", "false");
+    activeInlinePopup = null;
+  });
+  document.addEventListener("pointerdown", event => {
+    if (activeInlinePopup && !editor.contains(event.target) && !activeInlinePopup.anchor.contains(event.target)) editor.close();
+  }, { capture: true, signal: abort.signal });
+  function closeDockPopup() {
+    dockAnchor = null;
+    dockHoverId++;
+    if (editor.classList.contains("dock-resource-popover")) editor.close();
+  }
+  function positionDockPopup() {
+    if (!dockAnchor || !editor.open) return;
+    editor.classList.add("dock-resource-popover");
+    const anchor = dockAnchor.getBoundingClientRect();
+    editor.style.inset = "auto";
+    editor.style.margin = "0";
+    editor.style.transform = "none";
+    editor.style.left = Math.max(12, Math.min(anchor.left + anchor.width / 2 - editor.offsetWidth / 2, innerWidth - editor.offsetWidth - 12)) + "px";
+    editor.style.top = Math.max(12, anchor.top - editor.offsetHeight - 16) + "px";
+    editor.style.setProperty("--dock-tip-left", Math.max(16, Math.min(editor.offsetWidth - 16, anchor.left + anchor.width / 2 - parseFloat(editor.style.left))) + "px");
+  }
+  function setPointerMode(hand) {
+    panMode = hand;
+    select.setAttribute("aria-pressed", String(!hand));
+    select.title = hand ? "Kéo Canvas" : "Di chuyển";
+    select.replaceChildren(icon(hand ? "hand" : "pointer"));
+    viewport.style.cursor = hand ? "grab" : "";
+  }
+  function pointerTools() {
+    editor.className = "cvn-resource-sheet pointer-tool-menu";
+    editor.replaceChildren();
+    for (const [name, hand, key] of [["Di chuyển", false, "V"], ["Bàn tay", true, "H"]]) {
+      const item = button("", () => { setPointerMode(hand); closeDockPopup(); });
+      item.append(icon(hand ? "hand" : "pointer"), el("span", name), el("kbd", key));
+      item.setAttribute("aria-pressed", String(panMode === hand));
+      editor.append(item);
+    }
+    if (!editor.open) editor.show();
+  }
+  function materialTools() {
+    resourcePanel("Thư viện vật liệu");
+    editor.append(
+      button("Thư viện phong cách", () => { showStyles(); requestAnimationFrame(positionDockPopup); }),
+      button("Chỉ dẫn hiệu ứng", () => { showVideoHints([...selection][0], "effect"); requestAnimationFrame(positionDockPopup); }),
+    );
+  }
+  for (const control of dock.querySelectorAll(":scope > button")) {
+    const label = control.getAttribute("aria-label");
+    if (["Nhân vật", "Lịch sử"].includes(label)) continue;
+    const original = control.onclick;
+    const show = () => {
+      if (dockAnchor === control && editor.open) return;
+      dockAnchor = control;
+      const revision = ++dockHoverId;
+      const action = control === select ? pointerTools : label === "Phong cách" ? materialTools : () => original.call(control);
+      Promise.resolve(action()).then(() => {
+        if (dockAnchor === control && revision === dockHoverId) positionDockPopup();
+        else if (editor.classList.contains("dock-resource-popover")) editor.close();
+      }).catch(error => notice(error.message));
+    };
+    control.classList.add("dock-hover-button");
+    control.onpointerenter = event => { if (event.pointerType !== "touch") show(); };
+    control.onclick = show;
+  }
+  window.addEventListener("pointermove", event => {
+    if (!dockAnchor || !editor.open) return;
+    const button = dockAnchor.getBoundingClientRect(), panel = editor.getBoundingClientRect();
+    const inside = rect => event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    const bridge = { left: Math.min(button.left, panel.left), right: Math.max(button.right, panel.right), top: panel.bottom, bottom: button.top };
+    if (!inside(button) && !inside(panel) && !inside(bridge)) closeDockPopup();
+  }, { signal: abort.signal });
+  window.addEventListener("blur", closeDockPopup, { signal: abort.signal });
   function persist() {
     const graph = controller.snapshot();
     status.textContent = "Đang lưu…";
@@ -444,7 +565,7 @@ export async function mountStudio(host, id) {
     controller.execute({ type: "setViewport", viewport: pan });
     void persist();
   }
-  async function addNode(type, sourceId = null) {
+  async function addNode(type, sourceId = null, position = null) {
     if (type === "imageInput" || type === "videoInput") {
       files.accept = type === "imageInput" ? "image/*" : "video/*";
       files.click();
@@ -453,8 +574,8 @@ export async function mountStudio(host, id) {
     const n = {
       id: crypto.randomUUID(),
       type,
-      x: Math.max(-240, ...controller.snapshot().nodes.map((n) => n.x)) + 660,
-      y: 160,
+      x: position?.x ?? Math.max(-240, ...controller.snapshot().nodes.map((n) => n.x)) + 660,
+      y: position?.y ?? 160,
       data: {
         customName: {
           prompt: "Prompt",
@@ -594,9 +715,10 @@ export async function mountStudio(host, id) {
           undefined,
           "cvn-node " + (selection.has(n.id) ? "selected " : ""),
         ),
-        title = el("div", n.data.customName || n.type, "cvn-node-title"),
+        title = el("div", undefined, "cvn-node-title"),
         body = el("div", undefined, "cvn-node-body");
       card.dataset.id = n.id;
+      title.append(el("span", n.data.customName || n.type, "node-title-name"));
       if (["generateImage", "generateVideo"].includes(n.type)) {
         card.classList.add(n.type === "generateImage" ? "image-generation-node" : "video-generation-node");
         title.prepend(icon(n.type === "generateImage" ? "image" : "video"));
@@ -756,7 +878,7 @@ export async function mountStudio(host, id) {
         }
       }
       card.onpointerdown = (e) => {
-        if (panMode) return;
+        if (panMode || e.button !== 0) return;
         if (!selection.has(n.id) || selection.size !== 1) {
           selection = new Set([n.id]);
           renderContext();
@@ -791,6 +913,10 @@ export async function mountStudio(host, id) {
         }
         drag.nx = drag.x + (e.clientX - drag.startX) / pan.zoom;
         drag.ny = drag.y + (e.clientY - drag.startY) / pan.zoom;
+        if (canvasNavigation?.snapEnabled) {
+          drag.nx = Math.round(drag.nx / 24) * 24;
+          drag.ny = Math.round(drag.ny / 24) * 24;
+        }
         for (const origin of drag.origins) {
           const target = stage.querySelector(
             `[data-id="${CSS.escape(origin.id)}"]`,
@@ -829,6 +955,7 @@ export async function mountStudio(host, id) {
     renderContext();
     drawWires();
     transform();
+    canvasNavigation?.refresh();
     if (!graph.nodes.length) {
       const hint = el(
         "p",
@@ -845,6 +972,7 @@ export async function mountStudio(host, id) {
         drawFrame = null;
         positionFloatingPanels();
         drawWires();
+        canvasNavigation?.refreshMinimap();
       });
   }
   function drawWires() {
@@ -860,10 +988,14 @@ export async function mountStudio(host, id) {
         path = document.createElementNS(wires.namespaceURI, "path");
       path.setAttribute(
         "d",
-        `M${x} ${y} C${x + 100} ${y},${tx - 100} ${ty},${tx} ${ty}`,
+        `M${a.offsetLeft + a.offsetWidth} ${y} L${x} ${y} C${x + 100} ${y},${tx - 100} ${ty},${tx} ${ty} L${b.offsetLeft} ${ty}`,
       );
       if (e.targetPort === "workflow") path.classList.add("workflow-order-wire");
       wires.append(path);
+      const flow = path.cloneNode();
+      flow.classList.add("cvn-wire-flow");
+      flow.setAttribute("pathLength", "1000");
+      wires.append(flow);
     }
     if (linkDrag) {
       const card = stage.querySelector(`[data-id="${CSS.escape(linkDrag.id)}"]`),
@@ -942,16 +1074,18 @@ export async function mountStudio(host, id) {
     context.hidden = true;
     if (movingNode || selection.size !== 1) return;
     const n = controller.snapshot().nodes.find((n) => selection.has(n.id));
-    if (!n?.data.assetId) return;
+    if (!n) return;
     const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`);
     const image = card?.querySelector(".cvn-node-body > img"),
       video = card?.querySelector(".cvn-node-body > video");
-    if (!image && !video) return;
+    const isVideo = Boolean(video || ["generateVideo", "videoInput"].includes(n.type)),
+      isImage = Boolean(image || ["generateImage", "imageInput"].includes(n.type));
+    if (!isImage && !isVideo) return;
     context.hidden = false;
-    context.classList.toggle("cvn-video-toolbar", Boolean(video));
-    context.setAttribute("aria-label", video ? "Công cụ video đã chọn" : "Công cụ ảnh đã chọn");
+    context.classList.toggle("cvn-video-toolbar", isVideo);
+    context.setAttribute("aria-label", isVideo ? "Công cụ video đã chọn" : "Công cụ ảnh đã chọn");
     let downloadHost = context, trailingAction = null;
-    if (video) {
+    if (isVideo) {
       const capture = el("details", undefined, "video-frame-menu"),
         label = el("summary"), choices = el("div");
       label.append(icon("camera"), el("span", "Chụp khung hình"), icon("chevronDown"));
@@ -960,18 +1094,24 @@ export async function mountStudio(host, id) {
         ["Khung hình hiện tại", () => video.currentTime || 0],
         ["Khung hình đầu tiên", () => 0],
         ["Khung hình cuối cùng", () => Number.isFinite(video.duration) ? Math.max(0, video.duration - .05) : 0],
-      ]) choices.append(button(text, async () => {
-        const asset = await readAsset(n.data.assetId);
-        const output = await captureFrame(asset, time());
-        capture.open = false;
-        await addAssetNode(output);
-      }));
+      ]) {
+        const control = button(text, async () => {
+          const asset = await readAsset(n.data.assetId);
+          const output = await captureFrame(asset, time());
+          capture.open = false;
+          await addAssetNode(output);
+        });
+        control.disabled = !video;
+        if (!video) control.title = "Cần video kết quả trước.";
+        choices.append(control);
+      }
       capture.append(label, choices);
       const fullscreen = button("", async () => {
         if (video.requestFullscreen) await video.requestFullscreen();
         else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
         else throw Error("Trình duyệt chưa hỗ trợ mở video toàn màn hình.");
       });
+      fullscreen.disabled = !video;
       fullscreen.append(icon("expand"));
       fullscreen.title = "Xem video toàn màn hình";
       fullscreen.setAttribute("aria-label", "Xem video toàn màn hình");
@@ -984,7 +1124,8 @@ export async function mountStudio(host, id) {
       const action = tool => {
         const b = button("", () => imageTool(n, tool.mode));
         b.append(icon(tool.icon));
-        b.title = tool.label;
+        b.disabled = !image;
+        b.title = image ? tool.label : "Cần ảnh kết quả trước: " + tool.label;
         b.setAttribute("aria-label", tool.label);
         if (["edit", "grid"].includes(tool.mode)) b.append(el("span", tool.mode === "edit" ? "Chỉnh sửa ảnh" : tool.label));
         return b;
@@ -995,15 +1136,16 @@ export async function mountStudio(host, id) {
       label.append(el("span", "Thêm"), icon("chevronDown"));
       label.setAttribute("aria-label", "Thêm công cụ ảnh");
       menu.append(
-        button("Cắt và điều chỉnh ảnh", () => { more.open = false; return imageTool(n, "edit"); }),
+        button("Cắt và điều chỉnh ảnh", () => { more.open = false; if (!image) throw Error("Node chưa có ảnh kết quả."); return imageTool(n, "edit"); }),
         button("Thông tin ảnh", async () => {
           more.open = false;
           const asset = await readAsset(n.data.assetId);
-          if (!asset) throw Error("Ảnh không còn trong Kho.");
+          if (!asset || !image) throw Error("Node chưa có ảnh kết quả.");
           resourcePanel("Thông tin ảnh");
           editor.append(el("p", asset.name), el("p", `${image.naturalWidth} × ${image.naturalHeight} px`), el("p", asset.blob.type + " · " + (asset.blob.size / 1024).toLocaleString("vi-VN", { maximumFractionDigits: 1 }) + " KB"));
         }),
       );
+      if (!image) for (const item of menu.querySelectorAll("button")) item.disabled = true;
       more.append(label, menu);
       primary.append(more);
       for (const mode of ["rotate", "draw"]) {
@@ -1023,7 +1165,8 @@ export async function mountStudio(host, id) {
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     });
-    download.setAttribute("aria-label", video ? "Tải video xuống" : "Tải ảnh xuống");
+    download.disabled = !n.data.assetId;
+    download.setAttribute("aria-label", isVideo ? "Tải video xuống" : "Tải ảnh xuống");
     download.title = "Tải xuống";
     download.append(icon("download"));
     downloadHost.append(download);
@@ -1298,6 +1441,8 @@ export async function mountStudio(host, id) {
     };
     for (const sync of syncGroups) sync();
     refreshSummary();
+    summary.addEventListener("click", event => { if (event.detail > 1) event.preventDefault(); });
+    tabSummary.addEventListener("click", event => { if (event.detail > 1) event.preventDefault(); });
     settings.append(summary, settingsBody);
     settings.hidden = kind === "text";
     tabs.setAttribute("aria-label", "Tab chạy luồng");
@@ -1523,17 +1668,20 @@ export async function mountStudio(host, id) {
       const shortcuts = el("div", undefined, "inline-generation-tools");
       const style = button("", () => showStyles(id));
       style.append(icon("materials"));
-      style.setAttribute("aria-label", "Phong cách tạo ảnh/video");
-      style.title = "Phong cách";
+      style.setAttribute("aria-label", "Mẫu tạo nội dung");
+      style.title = "Mẫu tạo nội dung";
+      bindInlinePopup(style, () => showCreationTemplates(id));
       const camera = button("", () => showCamera(id));
       camera.append(el("span", undefined, "lens-glyph"));
       camera.classList.toggle("camera-configured", Boolean(n.data.cameraPrompt));
       camera.setAttribute("aria-label", "Ống kính và máy ảnh");
       camera.title = n.data.cameraPrompt || "Chọn máy ảnh và ống kính";
+      bindInlinePopup(camera, () => showCamera(id));
       const options = button("", () => { settings.open = !settings.open; });
       options.append(icon("sliders"));
       options.setAttribute("aria-label", "Thông số tạo ảnh/video");
       options.title = "Thông số";
+      options.onclick = event => { if (event.detail <= 1) settings.open = !settings.open; };
       shortcuts.append(style, camera, connection, options);
       footer.append(model, settings, shortcuts, send);
     } else footer.append(provider, settings, connection, send);
@@ -1697,12 +1845,66 @@ export async function mountStudio(host, id) {
     });
   }
   function resourcePanel(title) {
-    editor.classList.remove("creative-assistant", "camera-sheet");
+    editor.classList.remove("creative-assistant", "camera-sheet", "shortcut-popover", "pointer-tool-menu", "dock-resource-popover", "inline-resource-popover", "creation-template-sheet");
+    editor.removeAttribute("style");
+    if (activeInlinePopup) requestAnimationFrame(positionInlinePopup);
+    else if (dockAnchor) requestAnimationFrame(positionDockPopup);
     editor.replaceChildren(
       el("h2", title),
       button("Đóng", () => editor.close()),
     );
     if (!editor.open) editor.show();
+  }
+  function showCreationTemplates(targetId) {
+    resourcePanel("Mẫu tạo nội dung");
+    editor.classList.add("creation-template-sheet");
+    const heading = el("div", undefined, "creation-template-heading");
+    heading.append(...editor.childNodes);
+    const columns = el("div", undefined, "creation-template-columns"),
+      left = el("div"), right = el("div");
+    columns.append(left, right);
+    const groups = [
+      [left, "Phân cảnh & kể chuyện", [
+        ["Bảng phân cảnh chuyển động", "motion", "Thiết kế bảng phân cảnh với các hành động và hướng chuyển động nối tiếp rõ ràng, giữ nhất quán nhân vật và bối cảnh."],
+        ["Bảng phân cảnh", "layers", "Trình bày câu chuyện thành bảng phân cảnh điện ảnh, bố cục các khung rõ ràng, nhất quán nhân vật và ánh sáng."],
+        ["25 khung liên tiếp", "grid", "Tạo một bảng phân cảnh gồm 25 khung trong bố cục 5×5, hành động diễn tiến liên tục, giữ nhất quán nhân vật."],
+        ["Diễn biến bốn khung", "layout", "Tạo bố cục bốn khung mô tả tình huống, hành động, cao trào và kết quả, cùng nhân vật và bối cảnh."],
+        ["Tiếp diễn sau 3 giây", "clock", "Dựa vào ảnh tham chiếu, hình dung khung hình tiếp diễn sau khoảng 3 giây, giữ liên tục chủ thể, bối cảnh và hướng chuyển động."],
+        ["Tiếp diễn sau 5 giây", "clock", "Dựa vào ảnh tham chiếu, hình dung khung hình tiếp diễn sau khoảng 5 giây, giữ liên tục chủ thể và phong cách hình ảnh."],
+      ]],
+      [left, "Chất liệu & ánh sáng", [
+        ["Chi tiết chân dung", "smile", "Chân dung tự nhiên, giữ đặc điểm nhận dạng và chi tiết da, ánh sáng mềm, không làm mịn quá mức."],
+        ["Ánh sáng điện ảnh", "camera", "Ánh sáng điện ảnh có chiều sâu, kiểm soát vùng sáng tối, màu sắc nhất quán, giữ chủ thể tự nhiên."],
+      ]],
+      [right, "Bố cục & góc máy", [
+        ["Chín ô góc máy", "grid", "Tạo một ảnh bố cục 3×3 mô tả cùng chủ thể qua chín góc máy, giữ nhất quán ngoại hình và bối cảnh."],
+        ["Toàn · trung · cận", "frame", "Tạo một ảnh gồm ba khung toàn cảnh, trung cảnh và cận cảnh của cùng chủ thể, nhất quán ánh sáng và tạo hình."],
+      ]],
+      [right, "Thiết lập hình ảnh", [
+        ["Nhân vật ba góc nhìn", "smile", "Tạo một ảnh thiết lập nhân vật gồm góc chính diện, nghiêng và phía sau đặt cạnh nhau, giữ nguyên trang phục và tỷ lệ cơ thể."],
+        ["Khuôn mặt ba góc nhìn", "image", "Tạo một ảnh chân dung gồm chính diện, góc ba phần tư và nghiêng, cùng một nhân vật, giữ nhất quán khuôn mặt."],
+        ["Thiết kế nhân vật", "style", "Tạo bản thiết lập nhân vật rõ trang phục, dáng người, phụ kiện và bảng màu, giữ đặc điểm nhân dạng của ảnh tham chiếu."],
+        ["Thiết lập bối cảnh", "layers", "Tạo bản thiết lập bối cảnh nêu rõ bố cục không gian, vật liệu, nguồn sáng và các chi tiết chính."],
+        ["Thiết lập sản phẩm", "panorama", "Tạo ảnh thiết lập sản phẩm với các góc thể hiện hình dáng và chi tiết, giữ đúng màu sắc, chất liệu, nhãn và tỷ lệ."],
+      ]],
+    ];
+    for (const [column, title, templates] of groups) {
+      const section = el("section"); section.append(el("h3", title));
+      for (const [label, glyph, instruction] of templates) {
+        const action = button("", () => {
+          const node = controller.snapshot().nodes.find(node => node.id === targetId && node.type.startsWith("generate"));
+          if (!node) throw Error("Chọn một node tạo ảnh hoặc video trước.");
+          updateInline(targetId, { stylePrompt: instruction });
+          render(); editor.close();
+          notice("Đã áp dụng mẫu: " + label);
+        });
+        action.append(icon(glyph), el("span", label));
+        action.title = instruction;
+        section.append(action);
+      }
+      column.append(section);
+    }
+    editor.append(heading, columns, el("p", "Chọn mẫu để thêm chỉ dẫn cho node đang chọn.", "creation-template-note"));
   }
   function showStyles(targetId) {
     resourcePanel("Phong cách");
@@ -1833,83 +2035,24 @@ export async function mountStudio(host, id) {
     editor.append(form);
   }
   async function showCharacters() {
-    resourcePanel("Nhân vật của tôi");
-    const upload = el("input");
-    upload.type = "file";
-    upload.accept = "image/*";
-    upload.hidden = true;
-    upload.onchange = async () => {
-      try {
-        const file = upload.files[0];
-        if (!file) return;
-        const asset = await addAsset(file, { projectId: project.id });
-        const name = prompt("Tên nhân vật", file.name);
-        if (name === null) return;
-        await write("characters", {
-          id: crypto.randomUUID(),
-          name: name?.trim() || file.name,
-          assetId: asset.id,
-          createdAt: new Date().toISOString(),
-        });
-        await showCharacters();
-      } catch (e) {
-        notice(e.message);
-      }
-    };
-    editor.append(
-      button("＋ Thêm nhân vật", () => upload.click()),
-      upload,
-    );
-    for (const person of await list("characters")) {
-      editor.append(
-        button(person.name, async () => {
-          const asset = await readAsset(person.assetId);
-          if (!asset) throw Error("Ảnh nhân vật đã bị xóa. Hãy thêm lại.");
-          const target = controller
-            .snapshot()
-            .nodes.find(
-              (n) =>
-                selection.has(n.id) &&
-                ["generateImage", "generateVideo"].includes(n.type),
-            );
-          if (target) {
-            const source = {
-              id: crypto.randomUUID(),
-              type: "imageInput",
-              x: target.x - 660,
-              y: target.y,
-              data: { customName: person.name, assetId: asset.id },
-            };
-            controller.execute({ type: "addNode", node: source });
-            controller.execute({
-              type: "connect",
-              edge: {
-                id: crypto.randomUUID(),
-                source: source.id,
-                sourcePort: "image",
-                target: target.id,
-                targetPort: "reference",
-              },
-            });
-            render();
-            await persist();
-          } else await addAssetNode(asset);
-          editor.close();
-        }),
-      );
-      editor.append(
-        button("Xóa " + person.name, async () => {
-          if (
-            confirm(
-              "Xóa nhân vật khỏi thư viện? Ảnh gốc vẫn nằm trong Đầu vào.",
-            )
-          ) {
-            await remove("characters", person.id);
-            await showCharacters();
-          }
-        }),
-      );
-    }
+    editor.close();
+    const targetId = [...selection][0],
+      target = controller.snapshot().nodes.find(node => node.id === targetId),
+      canReference = Boolean(target && ["generateImage", "generateVideo"].includes(target.type));
+    return openCharacterLibrary({
+      projectId: project.id, signal: abort.signal, canReference,
+      onAdd: asset => addAssetNode(asset),
+      onReference: async person => {
+        const current = controller.snapshot().nodes.find(node => node.id === targetId);
+        if (!current || !canReference) throw Error("Chọn một node tạo ảnh/video để nhận tham chiếu.");
+        const asset = await readAsset(person.assetId);
+        if (!asset || asset.kind !== "image") throw Error("Ảnh nhân vật không còn trong Kho.");
+        const source = { id: crypto.randomUUID(), type: "imageInput", x: current.x - 660, y: current.y, data: { customName: person.name, assetId: person.assetId } };
+        controller.execute({ type: "addNode", node: source });
+        controller.execute({ type: "connect", edge: { id: crypto.randomUUID(), source: source.id, sourcePort: "image", target: current.id, targetPort: "reference" } });
+        selection = new Set([current.id]); render(); await persist();
+      },
+    });
   }
   function showImageTools() {
     resourcePanel("Công cụ ảnh");
@@ -1927,16 +2070,19 @@ export async function mountStudio(host, id) {
   function showHelp(shortcuts = false) {
     resourcePanel(shortcuts ? "Phím tắt" : "Trợ lý sáng tạo");
     if (shortcuts) {
-      for (const text of [
-        "V: chọn đối tượng",
-        "H: kéo canvas",
-        "Ctrl/Cmd + Z: hoàn tác",
-        "Ctrl/Cmd + Shift + Z: làm lại",
-        "Ctrl/Cmd + Enter: gửi prompt đang nhập",
-        "Nhấp node để chọn; nhấp nền để bỏ chọn. Mỗi lần chỉ chọn một node",
-        "Cuộn chuột: phóng to / thu nhỏ",
-      ])
-        editor.append(el("p", text));
+      editor.classList.add("shortcut-popover");
+      const grid = el("div", undefined, "shortcut-grid");
+      for (const [heading, rows] of [
+        ["Tạo nội dung", [["Sao chép node", "Ctrl/Cmd C"], ["Nhân bản", "Ctrl/Cmd D"], ["Dán", "Ctrl/Cmd V"], ["Gửi prompt", "Ctrl/Cmd Enter"]]],
+        ["Thu phóng", [["Phóng to / thu nhỏ", "Cuộn chuột"], ["Vừa khung", "Nút zoom → Vừa khung"], ["Bản đồ Canvas", "Nút bản đồ ở góc trái"]]],
+        ["Di chuyển", [["Chọn / kéo node", "V"], ["Kéo Canvas", "H"], ["Nối hai node", "Giữ chuột trên + rồi kéo"]]],
+        ["Thao tác khác", [["Hoàn tác", "Ctrl/Cmd Z"], ["Làm lại", "Ctrl/Cmd Shift Z"], ["Xóa node", "Delete"], ["Hủy nối / đóng bảng", "Esc"]]],
+      ]) {
+        const column = el("section"); column.append(el("h3", heading));
+        for (const [label, keys] of rows) { const row = el("div"); row.append(el("span", label), el("kbd", keys)); column.append(row); }
+        grid.append(column);
+      }
+      editor.append(grid);
       return;
     }
     editor.classList.add("creative-assistant");
@@ -1980,31 +2126,8 @@ export async function mountStudio(host, id) {
     return graph;
   }
   async function showHistory() {
-    editor.replaceChildren(
-      el("h2", "Tác vụ của dự án"),
-      button("Đóng", () => editor.close()),
-      button("Làm mới", showHistory),
-    );
-    for (const j of (await list("jobs")).filter((j) => j.projectId === id)) {
-      editor.append(
-        el(
-          "p",
-          j.title +
-            " · " +
-            {
-              success: "Hoàn tất",
-              sent: "Chờ AI",
-              queued: "Chờ lượt",
-              unknown: "Cần đối chiếu",
-              error: "Lỗi",
-              review: "Đã thu hồi kết quả",
-              stopped: "Đã dừng",
-            }[j.status],
-        ),
-      );
-      if (j.error) editor.append(el("small", j.error));
-    }
-    if (!editor.open) editor.show();
+    editor.close();
+    return openProjectAssetLibrary({ projectId: project.id, signal: abort.signal, onAdd: asset => addAssetNode(asset) });
   }
   async function showAssets() {
     editor.replaceChildren();
@@ -2063,8 +2186,197 @@ export async function mountStudio(host, id) {
     await show("media");
   }
 
+  const rightMenu = createCanvasMenu(abort.signal);
+  let copiedNode = null;
+  const historyStep = redo => { redo ? controller.redo() : controller.undo(); render(); void persist(); };
+  function duplicateNode(node, point = { x: node.x + 80, y: node.y + 80 }) {
+    const copy = { ...structuredClone(node), id: crypto.randomUUID(), ...point };
+    selection = new Set([copy.id]);
+    command({ type: "addNode", node: copy });
+  }
+  async function copyNode(node) {
+    copiedNode = structuredClone(node);
+    try { await navigator.clipboard.writeText(JSON.stringify({ format: "mooz-cvn-node", node: copiedNode })); }
+    catch { notice("Đã sao chép node trong Canvas. Trình duyệt chưa cho ghi clipboard hệ thống."); }
+  }
+  function pasteText(text, point) {
+    if (text.length > 5 * 1024 * 1024) throw Error("Nội dung dán quá lớn.");
+    let data;
+    try { data = JSON.parse(text); } catch {}
+    if (data?.format === "mooz-cvn-node" && data.node) duplicateNode(data.node, point);
+    else if (text.trim()) {
+      const node = { id: crypto.randomUUID(), type: "prompt", ...point, data: { text, customName: "Văn bản" } };
+      selection = new Set([node.id]);
+      command({ type: "addNode", node });
+    }
+  }
+  async function pasteNode(point) {
+    let text;
+    try { text = await navigator.clipboard.readText(); }
+    catch {
+      if (!copiedNode) throw Error("Trình duyệt chưa cho đọc clipboard. Dùng Ctrl/Cmd + V trên Canvas.");
+      duplicateNode(copiedNode, point);
+      return;
+    }
+    if (text) pasteText(text, point);
+    else if (copiedNode) duplicateNode(copiedNode, point);
+  }
+  async function saveNodeAsset(node) {
+    const asset = await readAsset(node.data.assetId);
+    if (!asset) throw Error("Node chưa có tài sản để lưu.");
+    await write(asset.source === "upload" ? "inputs" : "results", { ...asset, savedAt: new Date().toISOString(), savedProjectIds: [...new Set([...(asset.savedProjectIds || []), project.id])] });
+    notice("Đã lưu tài sản vào Kho " + (asset.source === "upload" ? "Đầu vào" : "Kết quả"));
+    canvasNavigation?.refresh();
+  }
+  async function downloadNode(node) {
+    const asset = node.data.assetId && await readAsset(node.data.assetId);
+    const blob = asset?.blob || new Blob([node.data.text || JSON.stringify({ format: "mooz-cvn-node", node }, null, 2)], { type: node.data.text ? "text/plain" : "application/json" });
+    const link = el("a"), url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = asset?.name || (node.data.customName || "MooZ-node") + (node.data.text ? ".txt" : ".json");
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function copyNodeImage(node) {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw Error("Trình duyệt chưa hỗ trợ sao chép ảnh.");
+    const asset = await readAsset(node.data.assetId);
+    if (asset?.kind !== "image") throw Error("Chọn node có ảnh.");
+    let blob = asset.blob;
+    if (blob.type !== "image/png") {
+      const bitmap = await createImageBitmap(blob);
+      try {
+        if (bitmap.width * bitmap.height > 32 * 1024 * 1024) throw Error("Ảnh quá lớn để sao chép.");
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d").drawImage(bitmap, 0, 0);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      } finally { bitmap.close(); }
+    }
+    if (!blob) throw Error("Không sao chép được ảnh.");
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    notice("Đã sao chép ảnh.");
+  }
+  async function createCharacterFromNode(node) {
+    const asset = await readAsset(node.data.assetId);
+    if (asset?.kind !== "image") throw Error("Chọn ảnh nhân vật hoặc chụp khung hình video trước.");
+    const name = prompt("Tên nhân vật", node.data.customName || asset.name);
+    if (!name?.trim()) return;
+    await write("characters", { id: crypto.randomUUID(), name: name.trim().slice(0, 100), assetId: asset.id, createdAt: new Date().toISOString() });
+    notice("Đã thêm nhân vật vào thư viện.");
+  }
+  function arrangeWorkflow() {
+    const graph = controller.snapshot(), levels = new Map(), rows = new Map();
+    const moves = topologicalOrder(graph).map(id => {
+      const parents = graph.edges.filter(edge => edge.target === id).map(edge => levels.get(edge.source) || 0);
+      const level = parents.length ? Math.max(...parents) + 1 : 0;
+      const row = rows.get(level) || 0;
+      rows.set(level, row + 1);
+      levels.set(id, level);
+      return { id, x: level * 820, y: 160 + row * 700 };
+    });
+    if (!moves.length) return;
+    command({ type: "moveNodes", moves });
+    fit();
+  }
+  shell.addEventListener("contextmenu", event => {
+    if (event.target.closest('input,textarea,select,[contenteditable="true"],.cvn-dock,.cvn-top,.cvn-hud,.cvn-image-toolbar,.canvas-assets-drawer')) return;
+    event.preventDefault();
+    pendingLink = null;
+    linkDrag = null;
+    drag = null;
+    clearConnectionTargets();
+    const card = event.target.closest(".cvn-node"),
+      node = controller.snapshot().nodes.find(node => node.id === card?.dataset.id),
+      origin = stage.getBoundingClientRect(),
+      point = { x: (event.clientX - origin.left) / pan.zoom, y: (event.clientY - origin.top) / pan.zoom };
+    selection = new Set(node ? [node.id] : []);
+    renderContext();
+    const items = [];
+    if (node) {
+      const rating = el("div", undefined, "canvas-context-rating");
+      rating.append(el("span", "Đánh giá"));
+      const stars = el("div");
+      for (let value = 1; value <= 5; value++) {
+        const star = button("★", () => {
+          rightMenu.close();
+          command({ type: "updateNode", id: node.id, patch: { rating: node.data.rating === value ? 0 : value } });
+        });
+        star.setAttribute("aria-label", value + " sao");
+        star.classList.toggle("rated", value <= (node.data.rating || 0));
+        stars.append(star);
+      }
+      rating.append(stars);
+      const image = Boolean(card.querySelector(".cvn-node-body > img"));
+      items.push(
+        { element: rating },
+        { label: "Lưu vào Kho tài sản", disabled: !node.data.assetId, action: () => saveNodeAsset(node) },
+        ...(image ? [{ label: "Xem trước ảnh", action: () => imageTool(node, "view") }, { label: "Tạo nhân vật", action: () => createCharacterFromNode(node) }] : []),
+        { label: "Sắp xếp workflow", action: arrangeWorkflow },
+        { separator: true },
+        { label: "Tải xuống", action: () => downloadNode(node) },
+        { label: "Sao chép node", shortcut: "Ctrl/Cmd C", action: () => copyNode(node) },
+        ...(image ? [{ label: "Sao chép ảnh", action: () => copyNodeImage(node) }] : []),
+        { label: "Nhân bản", shortcut: "Ctrl/Cmd D", action: () => duplicateNode(node) },
+        { label: "Dán", shortcut: "Ctrl/Cmd V", action: () => pasteNode(point) },
+        { label: "Xóa", shortcut: "Delete", danger: true, action: () => command({ type: "deleteNode", id: node.id }) },
+      );
+    } else items.push(
+      { label: "Tải lên", action: () => { files.accept = "image/*,video/*"; files.click(); } },
+      { label: "Lưu vào Kho tài sản", disabled: true, title: "Chọn một node có ảnh hoặc video trước." },
+      { label: "Thêm node", children: [["prompt", "Văn bản"], ["generateText", "Kịch bản"], ["generateImage", "Ảnh"], ["generateVideo", "Video"]].map(([type, label]) => ({ label, action: () => addNode(type, null, point) })) },
+      { separator: true },
+      { label: "Hoàn tác", shortcut: "Ctrl/Cmd Z", disabled: !controller.canUndo, action: () => historyStep(false) },
+      { label: "Làm lại", shortcut: "Ctrl/Cmd Shift Z", disabled: !controller.canRedo, action: () => historyStep(true) },
+      { separator: true },
+      { label: "Dán", shortcut: "Ctrl/Cmd V", action: () => pasteNode(point) },
+    );
+    rightMenu.show(items, event.clientX, event.clientY);
+  }, { signal: abort.signal });
+  document.addEventListener("paste", event => {
+    if (event.target.closest('input,textarea,[contenteditable="true"]')) return;
+    const text = event.clipboardData?.getData("text/plain");
+    if (!text) return;
+    event.preventDefault();
+    const point = { x: (innerWidth / 2 - pan.x) / pan.zoom, y: (innerHeight / 2 - pan.y) / pan.zoom };
+    try { pasteText(text, point); } catch (error) { notice(error.message); }
+  }, { signal: abort.signal });
+
+  canvasNavigation = createCanvasNavigation({
+    shell, hud, zoomNode: zoom, projectId: id, signal: abort.signal,
+    getName: () => project.name,
+    getGraph: () => controller.snapshot(),
+    getRects: () => controller.snapshot().nodes.map(node => {
+      const card = stage.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+      return { id: node.id, name: node.data.customName || node.type, x: card?.offsetLeft ?? node.x, y: card?.offsetTop ?? node.y, width: card?.offsetWidth || 340, height: card?.querySelector(".cvn-node-body")?.offsetHeight || 220 };
+    }),
+    onSelectNode: nodeId => {
+      const node = controller.snapshot().nodes.find(node => node.id === nodeId);
+      if (!node) return;
+      selection = new Set([nodeId]); renderContext();
+      const card = stage.querySelector(`[data-id="${CSS.escape(nodeId)}"]`);
+      centerCanvasAt(node.x + (card?.offsetWidth || 340) / 2, node.y + (card?.querySelector(".cvn-node-body")?.offsetHeight || 220) / 2);
+    },
+    onCenter: centerCanvasAt,
+    onLayout: arrangeWorkflow,
+    onOpenLibrary: () => showHistory(),
+    onUseAsset: asset => addAssetNode(asset),
+    onUsePrompt: item => {
+      const node = { id: crypto.randomUUID(), type: "prompt", x: (innerWidth / 2 - pan.x) / pan.zoom, y: (innerHeight / 2 - pan.y) / pan.zoom, data: { customName: item.name || "Prompt", text: item.text || "" } };
+      selection = new Set([node.id]); command({ type: "addNode", node });
+    },
+    onUseTemplate: item => { command({ type: "insertGraph", graph: item.graph }); fit(); },
+  });
+  function centerCanvasAt(x, y, drawerWidth = canvasNavigation?.drawerWidth || 0) {
+    pan.x = drawerWidth + (innerWidth - drawerWidth) / 2 - x * pan.zoom;
+    pan.y = innerHeight / 2 - y * pan.zoom;
+    transform();
+    controller.execute({ type: "setViewport", viewport: pan });
+    void persist();
+  }
+
   viewport.onpointerdown = (e) => {
-    if (e.target.closest(".cvn-image-toolbar")) return;
+    if (e.button !== 0 || e.target.closest(".cvn-image-toolbar")) return;
     if (e.target.closest(".cvn-node") && !panMode) return;
     pendingLink = null;
     for (const menu of stage.querySelectorAll(".port-menu")) menu.remove();
@@ -2129,6 +2441,12 @@ export async function mountStudio(host, id) {
     for (const node of stage.querySelectorAll(".connection-drop-target")) node.classList.remove("connection-drop-target");
   }
   window.addEventListener("pointermove", (event) => {
+    for (const node of stage.querySelectorAll(".cvn-node")) {
+      const body = node.querySelector(".cvn-node-body"), rect = body.getBoundingClientRect();
+      const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right),
+        dy = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom);
+      node.classList.toggle("ports-visible", Math.hypot(dx, dy) < 44 || linkDrag?.id === node.dataset.id || pendingLink?.id === node.dataset.id);
+    }
     if (!linkDrag) return;
     linkDrag.x = event.clientX;
     linkDrag.y = event.clientY;
@@ -2166,6 +2484,9 @@ export async function mountStudio(host, id) {
         pendingLink = null;
         linkDrag = null;
         clearConnectionTargets();
+        closeDockPopup();
+        if (activeInlinePopup) editor.close();
+        rightMenu.close();
         for (const menu of stage.querySelectorAll(".port-menu")) menu.remove();
         scheduleWires();
       }
@@ -2175,9 +2496,20 @@ export async function mountStudio(host, id) {
         !e.metaKey &&
         ["v", "h"].includes(e.key.toLowerCase())
       ) {
-        panMode = e.key.toLowerCase() === "h";
-        select.setAttribute("aria-pressed", String(!panMode));
-        viewport.style.cursor = panMode ? "grab" : "";
+        setPointerMode(e.key.toLowerCase() === "h");
+      }
+      const selectedNode = controller.snapshot().nodes.find(node => selection.has(node.id));
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selectedNode && !window.getSelection()?.toString()) {
+        e.preventDefault();
+        void copyNode(selectedNode).catch(error => notice(error.message));
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && selectedNode) {
+        e.preventDefault();
+        duplicateNode(selectedNode);
+      }
+      if (["Delete", "Backspace"].includes(e.key) && selectedNode) {
+        e.preventDefault();
+        command({ type: "deleteNode", id: selectedNode.id });
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();

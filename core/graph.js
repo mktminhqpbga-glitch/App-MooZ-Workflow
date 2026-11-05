@@ -45,6 +45,7 @@ const allowed = [
   "count",
   "resultAssets",
   "referenceOrder",
+  "rating",
 ];
 export const emptyGraph = () => ({
   nodes: [],
@@ -98,6 +99,8 @@ export function validateGraph(value) {
           throw Error("Danh sách kết quả không hợp lệ.");
       } else if (key === "count") {
         if (![1, 2, 4].includes(v)) throw Error("Số ảnh cần là 1, 2 hoặc 4.");
+      } else if (key === "rating") {
+        if (!Number.isInteger(v) || v < 0 || v > 5) throw Error("Đánh giá cần từ 0 đến 5 sao.");
       } else if (key === "quality") {
         if (!["low", "medium", "high", "ultra", "max"].includes(v))
           throw Error("Chất lượng không hợp lệ.");
@@ -230,6 +233,8 @@ export class GraphController {
   snapshot() {
     return structuredClone(this.#graph);
   }
+  get canUndo() { return this.#undo.length > 0; }
+  get canRedo() { return this.#redo.length > 0; }
   execute(command) {
     const next = this.snapshot();
     if (command.type === "addNode")
