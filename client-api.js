@@ -16,11 +16,10 @@ export async function api(path, body) {
       "Mất kết nối máy chủ. Kiểm tra lượt đã gửi trước khi chạy lại.",
     );
   }
-  const data = await response
-    .json()
-    .catch(() => ({
-      error: "Máy chủ chưa hỗ trợ API này. Chạy bản Node đầy đủ.",
-    }));
+  // A static SPA fallback returns HTML for /api/*, never a successful API result.
+  if (!response.headers.get("content-type")?.includes("application/json"))
+    throw Error("Bản web tĩnh chưa có máy chủ kết nối AI.");
+  const data = await response.json();
   if (!response.ok)
     throw Error(data.error || "Máy chủ trả HTTP " + response.status);
   return data;
