@@ -87,6 +87,17 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     // Reopen after the independent metadata/content writer to refresh this editor.
     await page.reload();
     const image = page.locator('.cvn-node[data-id="image-target"]'), toolbar = page.locator('.cvn-image-toolbar');
+    await page.locator('[data-id="src-b"] .cvn-node-body > img').waitFor();
+    const beforeSelection = await page.locator('.cvn-stage').getAttribute('style');
+    const firstSource = await page.locator('[data-id="src-a"] .cvn-node-body').boundingBox(), secondSource = await page.locator('[data-id="src-b"] .cvn-node-body').boundingBox();
+    await page.mouse.move(firstSource.x - 15, firstSource.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(secondSource.x + secondSource.width + 10, secondSource.y + secondSource.height - 5, { steps: 5 });
+    assert.equal(await page.locator('.cvn-selection-box').isVisible(), true);
+    await page.mouse.up();
+    assert.equal(await page.locator('.cvn-selection-box').isVisible(), false);
+    assert.equal(await page.locator('.cvn-node.selected').count(), 2, 'left drag selects multiple nodes');
+    assert.equal(await page.locator('.cvn-stage').getAttribute('style'), beforeSelection, 'left selection never pans or zooms Canvas');
     await image.locator('.cvn-node-title').click();
     assert.equal(await toolbar.isVisible(), true, 'empty selected node has toolbar');
     const bar = await toolbar.boundingBox(), prompt = await image.locator('.inline-composer').boundingBox();
@@ -148,6 +159,11 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     await page.locator('.pointer-tool-menu').getByRole('button', { name: /Bàn tay/ }).click();
     assert.equal(await mode.getAttribute('data-mode'), 'hand');
     const hand = await mode.locator('svg path').getAttribute('d');
+    const beforeHandPan = await page.locator('.cvn-stage').getAttribute('style');
+    await page.mouse.move(1450, 850); await page.mouse.down();
+    await page.mouse.move(1460, 860, { steps: 3 }); await page.mouse.up();
+    assert.notEqual(await page.locator('.cvn-stage').getAttribute('style'), beforeHandPan, 'hand tool still pans with left drag');
+    assert.equal(await page.locator('.cvn-selection-box').isVisible(), false);
     await page.keyboard.press('v');
     assert.equal(await mode.getAttribute('data-mode'), 'pointer');
     assert.notEqual(await mode.locator('svg path').getAttribute('d'), hand);
@@ -195,6 +211,7 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     await page.waitForFunction(async id => { const { ProjectRepository } = await import('./core/projects.js'); return (await new ProjectRepository().get(id)).graph.edges.some(edge => edge.source === 'src-b' && edge.target === 'video-target'); }, fixture.id);
     await image.locator('.cvn-node-body').click({ button: 'right' });
     await page.locator('.canvas-context-menu').getByRole('menuitem', { name: /Nhân bản/ }).waitFor();
+    assert.equal(await page.locator('.canvas-context-menu').getByText('Đánh giá', { exact: true }).count(), 0);
     await page.keyboard.press('Escape');
     await image.locator('.cvn-node-title').click();
     await page.locator('.cvn-dock').getByLabel('Kho', { exact: true }).click();

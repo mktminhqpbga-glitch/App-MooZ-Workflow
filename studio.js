@@ -928,7 +928,7 @@ export async function mountStudio(host, id) {
       }
       card.onpointerdown = (e) => {
         if (panMode || e.button !== 0) return;
-        if (!selection.has(n.id) || selection.size !== 1) {
+        if (!selection.has(n.id)) {
           selection = new Set([n.id]);
           renderContext();
         }
@@ -1110,11 +1110,11 @@ export async function mountStudio(host, id) {
   function renderContext() {
     const movingNode = drag?.mode === "node" && drag.moving;
     for (const card of stage.querySelectorAll(".cvn-node")) {
-      const selected = selection.size === 1 && selection.has(card.dataset.id);
+      const selected = selection.has(card.dataset.id);
       card.classList.toggle("selected", selected);
       const composer = card.querySelector(".inline-composer");
       if (composer) {
-        composer.hidden = !selected || movingNode;
+        composer.hidden = !selected || selection.size !== 1 || movingNode;
         if (!selected) for (const menu of composer.querySelectorAll("details[open]")) menu.open = false;
       }
     }
@@ -2355,22 +2355,8 @@ export async function mountStudio(host, id) {
     renderContext();
     const items = [];
     if (node) {
-      const rating = el("div", undefined, "canvas-context-rating");
-      rating.append(el("span", "Đánh giá"));
-      const stars = el("div");
-      for (let value = 1; value <= 5; value++) {
-        const star = button("★", () => {
-          rightMenu.close();
-          command({ type: "updateNode", id: node.id, patch: { rating: node.data.rating === value ? 0 : value } });
-        });
-        star.setAttribute("aria-label", value + " sao");
-        star.classList.toggle("rated", value <= (node.data.rating || 0));
-        stars.append(star);
-      }
-      rating.append(stars);
       const image = Boolean(card.querySelector(".cvn-node-body > img"));
       items.push(
-        { element: rating },
         { label: "Lưu vào Kho tài sản", disabled: !node.data.assetId, action: () => saveNodeAsset(node) },
         ...(image ? [{ label: "Xem trước ảnh", action: () => imageTool(node, "view") }, { label: "Tạo nhân vật", action: () => createCharacterFromNode(node) }] : []),
         { label: "Sắp xếp workflow", action: arrangeWorkflow },
@@ -2444,6 +2430,16 @@ export async function mountStudio(host, id) {
     controller.execute({ type: "setViewport", viewport: pan });
     void persist();
   }
+  const marquee = el("div", undefined, "cvn-selection-box");
+  marquee.hidden = true;
+  viewport.append(marquee);
+  function finishSelection(cancel = false) {
+    if (drag?.mode !== "select") return;
+    if (cancel) selection = drag.previous;
+    drag = null;
+    marquee.hidden = true;
+    renderContext();
+  }
   viewport.addEventListener("pointerdown", event => {
     if (event.button !== 1) return;
     event.preventDefault(); event.stopPropagation();
@@ -2463,8 +2459,15 @@ export async function mountStudio(host, id) {
     if (e.target.closest(".cvn-node") && !panMode) return;
     pendingLink = null;
     for (const menu of stage.querySelectorAll(".port-menu")) menu.remove();
-    selection.clear();
-    renderContext();
+    if (!panMode) {
+      const previous = new Set(selection);
+      if (!e.shiftKey) selection.clear();
+      drag = { mode: "select", startX: e.clientX, startY: e.clientY, previous, base: new Set(selection) };
+      renderContext();
+      e.preventDefault();
+      viewport.setPointerCapture(e.pointerId);
+      return;
+    }
     drag = {
       mode: "pan",
       startX: e.clientX,
@@ -2475,13 +2478,28 @@ export async function mountStudio(host, id) {
     viewport.setPointerCapture(e.pointerId);
   };
   viewport.onpointermove = (e) => {
+    if (drag?.mode === "select") {
+      const left = Math.min(drag.startX, e.clientX), top = Math.min(drag.startY, e.clientY),
+        right = Math.max(drag.startX, e.clientX), bottom = Math.max(drag.startY, e.clientY);
+      if (Math.hypot(right - left, bottom - top) < 3) return;
+      marquee.hidden = false;
+      Object.assign(marquee.style, { left: left + "px", top: top + "px", width: right - left + "px", height: bottom - top + "px" });
+      selection = new Set(drag.base);
+      for (const card of stage.querySelectorAll(".cvn-node")) {
+        const rect = card.querySelector(".cvn-node-body").getBoundingClientRect();
+        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) selection.add(card.dataset.id);
+      }
+      renderContext();
+      return;
+    }
     if (drag?.mode !== "pan") return;
     pan.x = drag.x + e.clientX - drag.startX;
     pan.y = drag.y + e.clientY - drag.startY;
     transform();
   };
-  viewport.onpointerup = finishPan;
-  viewport.onpointercancel = finishPan;
+  viewport.onpointerup = () => { finishSelection(); finishPan(); };
+  viewport.onpointercancel = () => { finishSelection(true); finishPan(); };
+  window.addEventListener("blur", () => finishSelection(true), { signal: abort.signal });
   window.addEventListener("blur", finishPan, { signal: abort.signal });
   viewport.addEventListener(
     "wheel",

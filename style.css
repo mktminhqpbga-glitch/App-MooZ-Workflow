@@ -1153,6 +1153,13 @@ dialog .project-actions {
   background: var(--bg);
   overflow: hidden;
 }
+.cvn-selection-box {
+  position: fixed;
+  pointer-events: none;
+  z-index: 5;
+  border: 1px solid var(--accent, #00c8ed);
+  background: color-mix(in srgb, var(--accent, #00c8ed) 12%, transparent);
+}
 .cvn-viewport {
   position: absolute;
   inset: 0;
@@ -2863,10 +2870,6 @@ dialog form > textarea {
 .canvas-context-menu hr, .dock-add-panel hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 7px 0; }
 .context-menu-shortcut { flex-shrink: 0; color: var(--muted); font-size: 10px; }
 .canvas-context-menu .context-menu-danger { color: #d66969; }
-.canvas-context-rating { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 10px; background: var(--raised); font-size: 12px; }
-.canvas-context-rating > div { display: flex; }
-.canvas-context-rating button { padding: 2px; font-size: 17px; color: var(--muted); }
-.canvas-context-rating button.rated { color: #e7ba65; }
 
 /* Full-height assets drawer and the utility strip at the lower left. */
 .cvn-hud.canvas-navigation { display: flex; align-items: center; gap: 3px; padding: 6px; border: 0; border-radius: 12px; background: var(--bg); box-shadow: none; z-index: 22; }
