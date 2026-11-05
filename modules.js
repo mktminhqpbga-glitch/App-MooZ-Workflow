@@ -1,3 +1,4 @@
+import { mountAssistantSettings } from "./assistant-ui.js";
 import {
   advancedImageOperations,
   readyOperations,
@@ -294,6 +295,7 @@ export async function mountSettings(host) {
   appearanceLink.href = "#appearance";
   preferences.append(el("h2", "Không gian và giao diện"), identity, appearanceLink);
   host.append(preferences);
+  mountAssistantSettings(host);
   const panel = el("section", undefined, "settings-panel"),
     status = el("p", "Đang kiểm tra máy chủ…"),
     code = el("textarea");

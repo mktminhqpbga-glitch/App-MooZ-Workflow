@@ -167,11 +167,17 @@ function appearance() {
     )}</div></div><div class="setting-row"><div><strong>Chuyển động giao diện</strong><p>Hiệu ứng nhẹ khi di chuột và mở điều hướng.</p></div><button id="motion" aria-pressed="${prefs.motion}" class="segmented">${prefs.motion ? "Đang bật" : "Đã tắt"}</button></div></section><button class="reset" id="reset">↺ Khôi phục giao diện mặc định</button>`;
 }
 let cleanup = () => {},
-  routeRevision = 0;
-function route() {
+  routeRevision = 0,
+  cleanupBarrier = Promise.resolve();
+async function route() {
   const revision = ++routeRevision;
-  cleanup();
+  const previousCleanup = cleanup;
   cleanup = () => {};
+  cleanupBarrier = cleanupBarrier.then(() => previousCleanup()).catch(error => {
+    console.error("Không hoàn tất lưu màn hình trước:", error.message);
+  });
+  await cleanupBarrier;
+  if (revision !== routeRevision) return;
   const canvasId = location.hash.startsWith("#canvas/")
     ? location.hash.slice(8)
     : null;

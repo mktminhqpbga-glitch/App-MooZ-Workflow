@@ -3075,3 +3075,56 @@ dialog form > textarea {
 .reference-picker-empty { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .cvn-dock > .dock-selected { position: relative; }
 .tool-mode-badge { position: absolute; top: 0; right: 0; display: grid; place-items: center; min-width: 13px; height: 13px; border-radius: 4px; background: var(--raised); color: var(--ink); font-size: 8px; font-weight: 650; line-height: 1; }
+.assistant-settings { margin-bottom: 24px; }
+.assistant-setting-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.assistant-setting-controls select { min-width: 180px; max-width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); font-size: 12px; }
+.assistant-setting-controls button { border: 1px solid var(--line); font-size: 12px; }
+.assistant-setting-controls button:disabled { opacity: .4; cursor: default; }
+.assistant-chat-status { margin: 12px 0 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.assistant-settings-link { display: inline-block; margin-bottom: 12px; color: var(--muted); font-size: 12px; text-decoration: underline; }
+.assistant-transcript { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.assistant-transcript:empty { display: none; }
+.assistant-chat-message { max-width: 95%; padding: 10px 12px; border-radius: 12px; background: var(--raised); }
+.assistant-message-user { align-self: flex-end; }
+.assistant-chat-message small { color: var(--muted); font-size: 10px; }
+.assistant-chat-message p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assistant-message-status { border: 1px solid var(--line); color: var(--muted); }
+.assistant-chat-form { display: grid; gap: 10px; }
+.assistant-chat-form > textarea { width: 100%; min-height: 90px; padding: 12px; font: inherit; font-size: 13px; }
+.assistant-chat-form > button { justify-self: end; padding: 9px 13px; background: var(--ink); color: var(--bg); font-size: 12px; }
+.assistant-chat-form > button:disabled { opacity: .4; cursor: default; }
+.resource-panel-heading { position: relative; padding-right: 72px; min-height: 30px; align-items: center; }
+.resource-panel-heading > button { position: absolute; top: 0; right: 0; }
+.style-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.style-choice-grid > button { min-height: 38px; padding: 9px; border: 1px solid var(--line); background: var(--raised); text-align: left; font-size: 13px; }
+.cvn-resource-sheet.style-preset-sheet[open] { width: 340px; }
+.middle-panning, .middle-panning * { cursor: grabbing !important; }
+.generation-options-panel > .resource-panel-heading { margin-bottom: 0; }
+.inline-connection-panel { min-width: 260px; }
+.inline-connection-panel > select { display: block; width: 100%; max-width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.inline-connection-panel > button { display: block; margin-top: 8px; font-size: 12px; }
+.dock-add-heading > button { display: grid; place-items: center; padding: 3px; }
+.dock-add-heading > button > svg { width: 15px; height: 15px; }
+.canvas-library.image-warehouse[open] { width: min(780px, calc(100vw - 40px)); height: min(540px, calc(100dvh - 80px)); border-radius: 18px; }
+.image-warehouse .canvas-library-header { padding: 16px 18px; }
+.image-warehouse .canvas-library-header h2 { font-size: 16px; }
+.image-warehouse-tabs { display: flex; gap: 6px; padding: 0 18px 10px; border-bottom: 1px solid var(--line); }
+.image-warehouse-tabs button, .image-warehouse-selection button { padding: 7px 10px; border-radius: 9px; font-size: 11px; }
+.image-warehouse-tabs button[aria-pressed="true"], .image-warehouse-selection button[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
+.image-warehouse-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 12px 18px; }
+.image-warehouse-toolbar > input { flex: 1; min-width: 120px; max-width: 220px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); font-size: 12px; }
+.image-warehouse-selection { display: flex; gap: 3px; margin-left: auto; }
+.image-warehouse .character-gallery { gap: 10px; padding: 4px 18px 16px; }
+.image-warehouse .character-view-grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+.image-warehouse .character-view-slide { align-items: flex-start; }
+.image-warehouse .character-view-slide > .character-card { flex-basis: 124px; }
+.image-warehouse-card { position: relative; gap: 6px; padding: 6px; border-radius: 11px; }
+.image-warehouse .character-card-preview, .image-warehouse .character-view-grid .character-card-preview { width: 100%; height: 94px; min-height: 0; }
+.image-warehouse .character-card-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: 7px; }
+.image-warehouse-card > strong { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.5; }
+.warehouse-selection-check { position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); font-size: 11px; }
+.image-warehouse-card.selected .warehouse-selection-check { background: var(--ink); color: var(--bg); }
+.image-warehouse .character-library-footer { padding: 12px 18px; gap: 7px; }
+.image-warehouse .character-library-footer button { padding: 8px 10px; font-size: 11px; }
+.image-warehouse-count { margin-right: auto; color: var(--muted); font-size: 11px; }
+.image-warehouse .character-library-footer > button:first-child { margin-right: 0; }

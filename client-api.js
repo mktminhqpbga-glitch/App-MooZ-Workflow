@@ -1,4 +1,20 @@
+import { getAssistantTab, cacheAssistantTab, assertWorkflowTabAvailable } from "./core/assistant-tab.js";
+function removeReservedWorkflowOptions() {
+  const assistant = getAssistantTab();
+  if (!assistant) return;
+  for (const select of document.querySelectorAll('select[aria-label="Tab chạy luồng"],select[aria-label="Tab hàng loạt"],select[aria-label="Tab cần kiểm tra"]')) {
+    const wasSelected = Number(select.value) === assistant.tabId;
+    for (const option of [...select.options]) if (Number(option.value) === assistant.tabId) option.remove();
+    if (wasSelected) { select.value = ""; select.dispatchEvent(new Event("change")); }
+  }
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("mooz-assistant-tab-change", removeReservedWorkflowOptions);
+  window.addEventListener("storage", removeReservedWorkflowOptions);
+}
 export async function api(path, body) {
+  if (path === "jobs" && body && !["google", "openai"].includes(body.provider))
+    assertWorkflowTabAvailable(body.tabId);
   const key = sessionStorage.getItem("mooz-server-access") || "";
   let response;
   try {
@@ -22,6 +38,11 @@ export async function api(path, body) {
   const data = await response.json();
   if (!response.ok)
     throw Error(data.error || "Máy chủ trả HTTP " + response.status);
+  if ((path === "status" || path === "assistant/config") && Object.hasOwn(data, "assistantTab")) cacheAssistantTab(data.assistantTab);
+  if (path.startsWith("tabs?") && new URLSearchParams(path.split("?")[1]).get("purpose") !== "assistant-setup" && Array.isArray(data)) {
+    const assistant = getAssistantTab();
+    return assistant ? data.filter(tab => tab.id !== assistant.tabId) : data;
+  }
   return data;
 }
 export const providerList = [

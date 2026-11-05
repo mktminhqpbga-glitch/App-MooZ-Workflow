@@ -1,5 +1,6 @@
 import { validateGraph, topologicalOrder } from "./graph.js";
 import { promptAssetIds } from "./references.js";
+import { assertWorkflowTabAvailable } from "./assistant-tab.js";
 import {
   readAsset,
   addAsset,
@@ -19,6 +20,7 @@ export async function createJob({
   title = "Tác vụ",
   kind = null,
 }) {
+  if (!["google", "openai"].includes(provider)) assertWorkflowTabAvailable(tabId);
   const snapshot = validateGraph(graph),
     generators = snapshot.nodes.filter((n) => n.type.startsWith("generate"));
   if (!generators.length) throw Error("Luồng chưa có bước AI.");

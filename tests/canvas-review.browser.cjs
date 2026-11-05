@@ -27,6 +27,22 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     const page = await browser.newPage({ viewport: { width: 1600, height: 1050 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    let assistant = null, workflowRequests = 0, assistantRequests = 0;
+    const availableTabs = [
+      { id: 8, title: 'Tab trợ lý kiểm chứng', url: 'https://grok.com/chat/assistant' },
+      { id: 9, title: 'Tab làm việc kiểm chứng', url: 'https://grok.com/chat/work' },
+    ];
+    await page.route('**/api/tabs?*', route => route.fulfill({ json: availableTabs }));
+    await page.route('**/api/assistant/config', route => {
+      if (route.request().method() === 'POST') {
+        const input = route.request().postDataJSON().tab;
+        const tab = input && availableTabs.find(tab => tab.id === input.tabId);
+        assistant = tab ? { provider: input.provider, tabId: tab.id, title: tab.title, chatURL: tab.url } : null;
+      }
+      return route.fulfill({ json: { assistantTab: assistant } });
+    });
+    await page.route('**/api/jobs', route => { workflowRequests++; return route.fulfill({ json: { status: 'error', error: 'This should not be reached for the reserved tab' } }); });
+    await page.route('**/api/assistant/messages', route => { assistantRequests++; return route.fulfill({ json: { status: 'success', result: { kind: 'text', text: 'Đã nhận yêu cầu trên tab trợ lý.' } } }); });
     await page.goto(url);
     const fixture = await page.evaluate(async video => {
       const { ProjectRepository, createProject } = await import('./core/projects.js');
@@ -58,6 +74,18 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
       return { id: project.id, image: canvas.toDataURL().split(',')[1] };
     }, video);
     await page.goto(url + '/#canvas/' + fixture.id);
+    const openingMetadata = await page.evaluate(async id => {
+      const { ProjectRepository } = await import('./core/projects.js');
+      const repo = new ProjectRepository(), before = await repo.get(id);
+      const opened = await new ProjectRepository().markOpened(id);
+      const saved = await repo.save(before);
+      return { revision: before.revision, opened: opened.revision, saved: saved.revision, timestamp: saved.lastOpenedAt === opened.lastOpenedAt };
+    }, fixture.id);
+    assert.equal(openingMetadata.opened, openingMetadata.revision);
+    assert.equal(openingMetadata.saved, openingMetadata.revision + 1);
+    assert.equal(openingMetadata.timestamp, true);
+    // Reopen after the independent metadata/content writer to refresh this editor.
+    await page.reload();
     const image = page.locator('.cvn-node[data-id="image-target"]'), toolbar = page.locator('.cvn-image-toolbar');
     await image.locator('.cvn-node-title').click();
     assert.equal(await toolbar.isVisible(), true, 'empty selected node has toolbar');
@@ -65,6 +93,18 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     assert.ok(bar.width < prompt.width * .9, 'toolbar shrinks rather than spanning prompt width');
     const groups = await toolbar.locator('.image-primary-tools,.image-utility-tools').evaluateAll(nodes => nodes.map(node => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right }; }));
     assert.ok(groups[1].left - groups[0].right < 24, 'no large empty gap between action groups');
+    for (const node of [image, page.locator('[data-id="video-target"]')]) {
+      await node.locator('.cvn-node-title').click();
+      const transform = await page.locator('.cvn-stage').getAttribute('style');
+      const expand = node.getByLabel('Mở rộng prompt', { exact: true });
+      await expand.click();
+      assert.equal(await expand.getAttribute('aria-expanded'), 'true');
+      assert.equal(await page.locator('.cvn-stage').getAttribute('style'), transform, 'expanding image/video prompt preserves zoom and pan');
+      await expand.click();
+      assert.equal(await expand.getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.locator('.cvn-stage').getAttribute('style'), transform, 'collapsing prompt preserves zoom and pan');
+    }
+    await image.locator('.cvn-node-title').click();
     await image.getByRole('button', { name: 'Tham chiếu', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.canvas-reference-card').length === 3);
     assert.equal(await image.locator('.canvas-reference-card img').count(), 2);
@@ -82,6 +122,13 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     }
     await image.getByLabel('Đóng bảng tham chiếu', { exact: true }).click();
     assert.equal(await image.locator('.inline-chooser').isVisible(), false);
+    const topStyle = image.locator('.inline-tools').getByRole('button', { name: 'Phong cách', exact: true });
+    await topStyle.click();
+    const stylePopup = page.locator('.cvn-resource-sheet');
+    const styleBox = await stylePopup.boundingBox(), styleAnchor = await topStyle.boundingBox(), closeBox = await stylePopup.getByRole('button', { name: 'Đóng', exact: true }).boundingBox();
+    assert.ok(styleBox.y + styleBox.height <= styleAnchor.y, 'top-row style opens above its trigger');
+    assert.ok(closeBox.x > styleBox.x + styleBox.width / 2 && closeBox.y < styleBox.y + 50, 'close is at the upper right');
+    await topStyle.click(); assert.equal(await stylePopup.isVisible(), false);
     const templates = image.getByLabel('Mẫu tạo nội dung', { exact: true });
     await templates.click();
     const editor = page.locator('.cvn-resource-sheet');
@@ -104,6 +151,32 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     await page.keyboard.press('v');
     assert.equal(await mode.getAttribute('data-mode'), 'pointer');
     assert.notEqual(await mode.locator('svg path').getAttribute('d'), hand);
+    const stage = page.locator('.cvn-stage');
+    const beforePan = await stage.getAttribute('style');
+    await page.mouse.move(1450, 850); await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(1490, 885, { steps: 4 });
+    assert.equal(await page.locator('.middle-panning').count(), 1);
+    assert.equal(await mode.getAttribute('data-mode'), 'temporary-hand');
+    await page.mouse.up({ button: 'middle' });
+    assert.equal(await page.locator('.middle-panning').count(), 0);
+    assert.equal(await mode.getAttribute('data-mode'), 'pointer');
+    assert.notEqual(await stage.getAttribute('style'), beforePan);
+    assert.ok((await stage.getAttribute('style')).includes('scale(0.65)'));
+    const movingSource = page.locator('[data-id="src-a"]');
+    await page.evaluate(() => {
+      window.reviewImage = document.querySelector('[data-id="src-a"] .cvn-node-body > img');
+      window.reviewVideo = document.querySelector('[data-id="src-v"] .cvn-node-body > video');
+      window.reviewLoads = 0;
+      window.reviewImage.addEventListener('load', () => window.reviewLoads++);
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const beforeX = await movingSource.evaluate(node => node.offsetLeft), sourceTitle = await movingSource.locator('.cvn-node-title').boundingBox();
+      await page.mouse.move(sourceTitle.x + 12, sourceTitle.y + 5); await page.mouse.down();
+      await page.mouse.move(sourceTitle.x + 38, sourceTitle.y + 18, { steps: 4 }); await page.mouse.up();
+      assert.equal(await movingSource.evaluate(node => node.offsetLeft), beforeX + 40, 'successive drags use the updated position');
+      assert.ok(await page.evaluate(() => window.reviewImage === document.querySelector('[data-id="src-a"] .cvn-node-body > img') && window.reviewVideo === document.querySelector('[data-id="src-v"] .cvn-node-body > video') && window.reviewLoads === 0), 'moving nodes preserves existing media elements without reloading');
+    }
+    await image.locator('.cvn-node-title').click();
     const title = await image.locator('.cvn-node-title').boundingBox();
     await page.mouse.move(title.x + 15, title.y + 5); await page.mouse.down(); await page.mouse.move(title.x + 35, title.y + 25, { steps: 4 });
     assert.equal(await toolbar.isVisible(), false, 'toolbar hides during drag');
@@ -123,19 +196,24 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     await image.locator('.cvn-node-body').click({ button: 'right' });
     await page.locator('.canvas-context-menu').getByRole('menuitem', { name: /Nhân bản/ }).waitFor();
     await page.keyboard.press('Escape');
-    await page.getByLabel('Nhân vật', { exact: true }).click();
-    const library = page.locator('.character-library');
-    await library.locator('.character-card img').waitFor();
-    assert.ok(await library.locator('.character-card img').evaluate(image => image.complete && image.naturalWidth > 0));
+    await image.locator('.cvn-node-title').click();
+    await page.locator('.cvn-dock').getByLabel('Kho', { exact: true }).click();
+    const library = page.locator('.image-warehouse');
+    await library.locator('.character-card img').first().waitFor();
+    assert.ok(await library.locator('.character-card img').first().evaluate(image => image.complete && image.naturalWidth > 0));
+    assert.ok((await library.boundingBox()).width <= 780);
+    assert.ok((await library.locator('.character-card').first().boundingBox()).width < 180);
+    await library.locator('.character-card').filter({ hasText: 'ảnh đỏ.png' }).click();
+    await library.locator('.character-card').filter({ hasText: 'ảnh xanh.png' }).click();
+    assert.equal(await library.locator('.character-card[aria-pressed="true"]').count(), 2);
+    await library.getByRole('button', { name: 'Chọn một', exact: true }).click();
+    assert.equal(await library.locator('.character-card[aria-pressed="true"]').count(), 1);
+    await library.getByRole('button', { name: 'Chọn nhiều', exact: true }).click();
+    await library.getByLabel('Xem trượt', { exact: true }).click();
+    assert.equal(await library.locator('.character-view-slide').count(), 1);
     await library.getByLabel('Xem lưới', { exact: true }).click();
-    assert.equal(await library.locator('.character-view-grid').count(), 1);
-    await library.getByRole('button', { name: '＋ Tạo nhân vật mới', exact: true }).click();
-    const edit = page.locator('.character-edit-dialog');
-    await edit.getByLabel('Tên nhân vật', { exact: true }).fill('Nhân vật mới');
-    await edit.getByLabel('Ảnh nhân vật', { exact: true }).setInputFiles({ name: 'new.png', mimeType: 'image/png', buffer: Buffer.from(fixture.image, 'base64') });
-    await edit.locator('.character-upload-preview img').waitFor();
-    await edit.getByRole('button', { name: 'Lưu nhân vật', exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll('.character-card img').length === 2);
+    await library.getByLabel('Tải ảnh vào Kho', { exact: true }).setInputFiles({ name: 'new.png', mimeType: 'image/png', buffer: Buffer.from(fixture.image, 'base64') });
+    await page.waitForFunction(() => document.querySelectorAll('.image-warehouse-card img').length === 3);
     await library.getByRole('button', { name: 'Đóng', exact: true }).click();
     await page.getByLabel('Lịch sử', { exact: true }).click();
     const history = page.locator('.project-asset-library');
@@ -145,12 +223,70 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     assert.equal(await history.locator('.project-library-card').count(), 2);
     await history.getByRole('button', { name: 'Đóng', exact: true }).click();
     await page.getByLabel('Quản lý tài sản', { exact: true }).click();
+    assert.equal(new URL(page.url()).hash, '#canvas/' + fixture.id, 'asset manager stays inside the current Canvas');
+    assert.equal(await page.locator('.cvn-studio').count(), 1);
     assert.equal(await page.locator('.canvas-assets-drawer').isVisible(), true);
     await page.locator('.canvas-assets-drawer').getByLabel('Thu bảng tài sản', { exact: true }).first().click();
     assert.equal(await page.locator('.canvas-assets-drawer').isVisible(), false);
+    await page.getByLabel('Sắp xếp workflow', { exact: true }).click();
+    const arranged = await page.locator('.cvn-node').evaluateAll(nodes => nodes.map(node => ({ x: node.offsetLeft, y: node.offsetTop, height: node.querySelector('.cvn-node-body').offsetHeight })));
+    for (const x of new Set(arranged.map(node => node.x))) {
+      const column = arranged.filter(node => node.x === x).sort((a, b) => a.y - b.y);
+      for (let index = 1; index < column.length; index++) assert.equal(column[index].y - column[index - 1].y - column[index - 1].height, 30, 'layout gap is exactly 30px');
+    }
+    assert.ok((await stage.getAttribute('style')).includes('scale(0.65)'), 'UI actions and layout preserve zoom');
+    const previousIds = await page.locator('.cvn-node').evaluateAll(nodes => nodes.map(node => node.dataset.id));
+    await page.getByLabel('Thêm vào canvas', { exact: true }).click();
+    await page.locator('.dock-add-panel').getByRole('button', { name: 'Ảnh', exact: true }).click();
+    const newId = await page.locator('.cvn-node').evaluateAll((nodes, previous) => nodes.find(node => !previous.includes(node.dataset.id)).dataset.id, previousIds);
+    const newPreview = await page.locator(`[data-id="${newId}"] > .cvn-node-body`).boundingBox();
+    assert.ok(Math.abs(newPreview.x + newPreview.width / 2 - 800) < 2 && Math.abs(newPreview.y + newPreview.height / 2 - 525) < 2, 'new node appears at the viewport center');
+    assert.ok((await stage.getAttribute('style')).includes('scale(0.65)'));
+    for (let visit = 0; visit < 3; visit++) {
+      await page.evaluate(() => { location.hash = '#settings'; });
+      await page.getByLabel('Dịch vụ trợ lý AI', { exact: true }).waitFor();
+      await page.evaluate(id => { location.hash = '#canvas/' + id; }, fixture.id);
+      await page.locator('.cvn-node[data-id="image-target"]').waitFor();
+      await page.getByLabel('Quản lý tài sản', { exact: true }).click();
+      assert.equal(await page.locator('.canvas-assets-drawer').isVisible(), true);
+      await page.getByLabel('Quản lý tài sản', { exact: true }).click();
+      assert.equal(new URL(page.url()).hash, '#canvas/' + fixture.id);
+      assert.ok((await page.locator('.cvn-stage').getAttribute('style')).includes('scale(0.65)'), 'rapid reopen keeps saved zoom');
+      assert.equal(await page.getByText(/Dự án đã thay đổi ở tab khác/).count(), 0, 'opening metadata never conflicts with the previous save');
+    }
+    await page.goto(url + '/#settings');
+    await page.getByLabel('Dịch vụ trợ lý AI', { exact: true }).selectOption('grok');
+    await page.getByRole('button', { name: 'Cập nhật tab trợ lý', exact: true }).click();
+    await page.getByLabel('Tab dành riêng cho trợ lý AI', { exact: true }).selectOption('8');
+    await page.getByRole('button', { name: 'Dành tab này cho trợ lý', exact: true }).click();
+    assert.equal(assistant.tabId, 8);
+    await page.goto(url + '/#canvas/' + fixture.id);
+    const videoNode = page.locator('[data-id="video-target"]');
+    await videoNode.locator('.cvn-node-title').click();
+    await videoNode.getByLabel('AI thực hiện', { exact: true }).selectOption('grok');
+    await videoNode.locator('.inline-connection summary').click();
+    await page.waitForFunction(() => document.querySelector('[data-id="video-target"] [aria-label="Tab chạy luồng"] option[value="9"]'));
+    assert.equal(await videoNode.locator('[aria-label="Tab chạy luồng"] option[value="8"]').count(), 0, 'reserved tab is excluded from workflow choices');
+    const rejected = await page.evaluate(async () => {
+      const { api } = await import('./client-api.js');
+      try { await api('jobs', { provider: 'grok', tabId: 8, prompt: 'blocked' }); return ''; }
+      catch (error) { return error.message; }
+    });
+    assert.ok(rejected.includes('dành riêng'));
+    assert.equal(workflowRequests, 0, 'reserved tab is rejected before a workflow request');
+    await page.getByLabel('Trợ lý sáng tạo', { exact: true }).click();
+    await page.getByLabel('Tin nhắn cho trợ lý AI', { exact: true }).fill('Hãy giúp tôi xây dựng ý tưởng.');
+    await page.getByRole('button', { name: 'Gửi cho trợ lý', exact: true }).click();
+    await page.getByText('Đã nhận yêu cầu trên tab trợ lý.', { exact: true }).waitFor();
+    assert.equal(assistantRequests, 1);
+    await page.locator('.cvn-resource-sheet').getByRole('button', { name: 'Đóng', exact: true }).click();
+    await page.goto(url + '/#settings');
+    await page.getByRole('button', { name: 'Bỏ tab trợ lý', exact: true }).click();
+    const released = await page.evaluate(async () => { const { api } = await import('./client-api.js'); return api('tabs?provider=grok'); });
+    assert.deepEqual(released.map(tab => tab.id), [8, 9]);
     assert.deepEqual(errors, []);
     if (process.env.REVIEW_DIR) { await mkdir(process.env.REVIEW_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.REVIEW_DIR, 'canvas-review.png') }); }
-    console.log('PASS built static app: compact toolbar, visual references, close/toggle, camera, pointer icon, drag panels/wires, context menu, character upload/grid, project history and asset drawer. No live AI.');
+    console.log('PASS built static app: compact toolbar, visual references, close/toggle, camera, pointer icon, drag panels/wires, context menu, compact multi-select image warehouse, middle-pan and 30px layout, project history, asset drawer and exclusive assistant tab settings/chat. No live AI.');
   } finally {
     await browser?.close(); await new Promise(resolve => server.close(resolve)); await rm(temporary, { recursive: true, force: true });
   }

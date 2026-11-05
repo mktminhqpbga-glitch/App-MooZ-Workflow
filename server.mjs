@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import { ChromeConnection } from "./server/connection.mjs";
 import { ServerJobs } from "./server/jobs.mjs";
 import { apiProviders, generateAPI } from "./server/providers.mjs";
+import { AssistantTab } from "./server/assistant-tab.mjs";
 const root = process.cwd(),
   host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 4174),
@@ -16,6 +17,8 @@ if (
   throw Error("Đặt MOOZ_ACCESS_TOKEN trước khi mở máy chủ ra mạng.");
 const chrome = new ChromeConnection(runtime);
 await chrome.init();
+const assistantTab = new AssistantTab(runtime);
+await assistantTab.init();
 const jobs = new ServerJobs(
   resolve(runtime, "requests"),
   async (input, sent) => {
@@ -51,7 +54,9 @@ const jobs = new ServerJobs(
       !Number.isSafeInteger(input.tabId)
     )
       throw Error("Chọn AI và tab đã kết nối.");
+    assistantTab.assertJob(input);
     await chrome.check(input);
+    assistantTab.assertJob(input);
     await sent();
     return chrome.generate(input);
   },
@@ -66,6 +71,7 @@ const staticFiles = new Set([
   "canvas-menu.js",
   "canvas-navigation.js",
   "canvas-libraries.js",
+  "assistant-ui.js",
   "modules.js",
   "jobs-ui.js",
   "core/graph.js",
@@ -75,6 +81,7 @@ const staticFiles = new Set([
   "core/backup.js",
   "core/capabilities.js",
   "core/references.js",
+  "core/assistant-tab.js",
   "media-tools.js",
   "image-workbench.js",
   "icons.js",
@@ -127,6 +134,7 @@ const server = createServer(async (req, res) => {
       if (path === "/api/status" && req.method === "GET")
         return json(res, 200, {
           chrome: chrome.status(),
+          assistantTab: assistantTab.snapshot(),
           providers: Object.entries(apiProviders).map(([id, p]) => ({
             id,
             name: p.name,
@@ -139,8 +147,26 @@ const server = createServer(async (req, res) => {
         return json(
           res,
           200,
-          await chrome.tabs(url.searchParams.get("provider")),
+          (await chrome.tabs(url.searchParams.get("provider"))).filter(tab => url.searchParams.get("purpose") === "assistant-setup" || tab.id !== assistantTab.snapshot()?.tabId),
         );
+      if (path === "/api/assistant/config" && req.method === "GET")
+        return json(res, 200, { assistantTab: assistantTab.snapshot() });
+      if (path === "/api/assistant/config" && req.method === "POST") {
+        const input = await body(req);
+        if (!Object.hasOwn(input, "tab")) throw Error("Thiếu lựa chọn tab trợ lý.");
+        const selection = await assistantTab.configure(input.tab, {
+          check: value => chrome.check(value),
+          isBusy: id => jobs.resources.has("tab:" + id),
+        });
+        return json(res, 200, { assistantTab: selection });
+      }
+      if (path === "/api/assistant/messages" && req.method === "POST") {
+        const input = await body(req), selected = assistantTab.snapshot();
+        if (!selected) throw Error("Chọn tab Trợ lý AI trong Cài đặt trước.");
+        const actual = (await chrome.tabs(selected.provider)).find(tab => tab.id === selected.tabId);
+        if (!actual) throw Error("Tab trợ lý không còn kết nối. Kiểm tra lại trong Cài đặt.");
+        return json(res, 200, await jobs.run({ requestId: input.requestId, prompt: input.prompt, purpose: "assistant", mediaType: "text", provider: selected.provider, tabId: selected.tabId, chatURL: actual.url }));
+      }
       if (path === "/api/chrome/pair" && req.method === "POST")
         return json(res, 200, await chrome.pair());
       if (path === "/api/chrome/resume" && req.method === "POST") {
@@ -156,7 +182,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (path === "/api/jobs" && req.method === "POST")
-        return json(res, 200, await jobs.run(await body(req)));
+        return json(res, 200, await jobs.run({ ...await body(req), purpose: "workflow" }));
       if (path.startsWith("/api/jobs/") && req.method === "GET") {
         const record = await jobs.get(path.slice(10));
         return json(

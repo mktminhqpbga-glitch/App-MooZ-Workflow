@@ -168,12 +168,31 @@ export class ProjectRepository {
           return;
         }
         clean.revision = create ? 1 : old.revision + 1;
+        if (old?.lastOpenedAt && (!clean.lastOpenedAt || old.lastOpenedAt > clean.lastOpenedAt))
+          clean.lastOpenedAt = old.lastOpenedAt;
         store.put(clean);
       };
       tx.oncomplete = () => resolve(structuredClone(clean));
       tx.onerror = () => reject(error || tx.error);
       tx.onabort = () =>
         reject(error || tx.error || Error("Chưa lưu được dự án."));
+    });
+  }
+  async markOpened(id) {
+    await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = this.#db.transaction("projects", "readwrite"), store = tx.objectStore("projects"), request = store.get(id);
+      let project;
+      request.onsuccess = () => {
+        project = request.result;
+        if (!project) return;
+        // Visiting changes metadata only, never the graph revision used by editors.
+        project.lastOpenedAt = new Date().toISOString();
+        store.put(project);
+      };
+      tx.oncomplete = () => resolve(project);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || Error("Chưa ghi nhận được lần mở dự án."));
     });
   }
   async delete(id, revision) {

@@ -7,6 +7,7 @@
     "start:server": "node server.mjs",
     "build": "node build.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:review": "node tests/canvas-review.browser.cjs",
     "test:browser": "node tests/projects.browser.cjs && node tests/workspace.browser.cjs && node tests/media.browser.cjs && node tests/inline.browser.cjs && node tests/image-tools.browser.cjs"
   },
   "engines": {

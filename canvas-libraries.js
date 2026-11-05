@@ -19,132 +19,95 @@ function libraryShell(className, title, signal) {
 }
 
 export async function openCharacterLibrary({ projectId, signal, canReference, onReference, onAdd }) {
-  const { dialog, header, urlFor } = libraryShell('character-library', 'Nhân vật của tôi', signal),
-    toolbar = el('div', undefined, 'character-library-toolbar'), filters = el('div', undefined, 'character-library-filters'),
-    search = el('input'), gender = el('select'), age = el('select'), region = el('select'),
+  const { dialog, urlFor } = libraryShell('character-library image-warehouse', 'Kho', signal),
+    toolbar = el('div', undefined, 'image-warehouse-toolbar'), tabs = el('div', undefined, 'image-warehouse-tabs'),
+    search = el('input'), selectionModes = el('div', undefined, 'image-warehouse-selection'),
     views = el('div', undefined, 'character-view-switch'), gallery = el('div', undefined, 'character-gallery'),
-    footer = el('div', undefined, 'character-library-footer');
-  let people = [], selected = null, mode = 'slide';
-  search.type = 'search'; search.placeholder = 'Tìm nhân vật…'; search.setAttribute('aria-label', 'Tìm nhân vật');
-  for (const [select, label] of [[gender, 'Giới tính'], [age, 'Nhóm tuổi'], [region, 'Khu vực']]) {
-    select.setAttribute('aria-label', label); select.add(new Option(label, '')); select.onchange = render;
+    footer = el('div', undefined, 'character-library-footer'), count = el('span', '', 'image-warehouse-count'), upload = el('input');
+  let assets = [], category = 'inputs', mode = 'grid', multiple = true, selected = new Set();
+  search.type = 'search'; search.placeholder = 'Tìm ảnh trong Kho…'; search.setAttribute('aria-label', 'Tìm ảnh trong Kho'); search.oninput = render;
+  upload.type = 'file'; upload.accept = 'image/*'; upload.multiple = true; upload.hidden = true; upload.setAttribute('aria-label', 'Tải ảnh vào Kho');
+  const tabButtons = [];
+  for (const [value, name] of [['inputs', 'Đầu vào'], ['results', 'Kết quả']]) {
+    const control = button(name, () => { category = value; void load(); });
+    control.dataset.category = value; tabs.append(control); tabButtons.push(control);
   }
-  search.oninput = render;
-  filters.append(gender, age, region, search);
   for (const [value, label, glyph] of [['slide', 'Xem trượt', 'panorama'], ['grid', 'Xem lưới', 'layout']]) {
     const control = button('', () => { mode = value; render(); });
     control.append(icon(glyph)); control.dataset.mode = value; control.title = label; control.setAttribute('aria-label', label); views.append(control);
   }
-  toolbar.append(filters, views);
-  const create = button('＋ Tạo nhân vật mới', () => editPerson()), add = button('Thêm vào Canvas', async () => {
-    const asset = selected && await readAsset(selected.assetId);
-    if (!asset) throw Error('Chọn nhân vật có ảnh trước.');
-    await onAdd(asset); dialog.close();
-  }), reference = button('Dùng làm tham chiếu', async () => {
-    if (!selected) return;
-    await onReference(selected); dialog.close();
-  }), edit = button('Chỉnh sửa nhân vật', () => editPerson(selected));
-  footer.append(create, add, reference, edit);
-  dialog.append(toolbar, gallery, footer);
-  async function load() {
-    people = await list('characters');
-    if (!dialog.isConnected) return;
-    for (const [select, field, label] of [[gender, 'gender', 'Giới tính'], [age, 'ageGroup', 'Nhóm tuổi'], [region, 'region', 'Khu vực']]) {
-      const value = select.value;
-      select.replaceChildren(new Option(label, ''));
-      for (const option of [...new Set(people.map(person => person[field]).filter(Boolean))]) select.add(new Option(option, option));
-      select.value = [...select.options].some(option => option.value === value) ? value : '';
-    }
-    if (selected) selected = people.find(person => person.id === selected.id) || null;
-    render();
+  for (const [value, label] of [[false, 'Chọn một'], [true, 'Chọn nhiều']]) {
+    const control = button(label, () => { multiple = value; if (!multiple && selected.size > 1) selected = new Set([[...selected][0]]); render(); });
+    control.dataset.multiple = String(value); selectionModes.append(control);
   }
+  toolbar.append(search, selectionModes, views);
+  const uploadButton = button('＋ Tải ảnh', () => upload.click()), add = button('Thêm vào Canvas', async () => {
+    const picked = await selectedAssets();
+    for (const asset of picked) await onAdd(asset);
+    if (picked.length) dialog.close();
+  }), reference = button('Dùng làm tham chiếu', async () => {
+    const picked = await selectedAssets();
+    for (const asset of picked) await onReference({ name: asset.name, assetId: asset.id });
+    if (picked.length) dialog.close();
+  }), clear = button('Bỏ chọn', () => { selected.clear(); render(); });
+  footer.append(uploadButton, count, clear, add, reference);
+  dialog.append(tabs, toolbar, gallery, footer, upload);
+  async function selectedAssets() {
+    const items = [];
+    for (const id of selected) {
+      const asset = await readAsset(id);
+      if (!asset || asset.kind !== 'image') throw Error('Một ảnh đã bị xóa khỏi Kho. Hãy chọn lại.');
+      items.push(asset);
+    }
+    return items;
+  }
+  async function load() {
+    try {
+      const value = category;
+      const items = await list(value);
+      if (!dialog.isConnected || value !== category) return;
+      assets = items.filter(asset => asset.kind === 'image');
+      render();
+    } catch (error) { notice(error.message); }
+  }
+  upload.onchange = async () => {
+    uploadButton.disabled = true;
+    try {
+      const added = [];
+      for (const file of upload.files) added.push(await addAsset(file, { projectId }));
+      if (added.length) selected = multiple ? new Set([...selected, ...added.map(asset => asset.id)]) : new Set([added[0].id]);
+      upload.value = ''; category = 'inputs'; await load();
+    } catch (error) { notice(error.message); }
+    finally { uploadButton.disabled = false; }
+  };
   function render() {
     gallery.className = 'character-gallery character-view-' + mode;
     gallery.replaceChildren();
+    for (const control of tabButtons) control.setAttribute('aria-pressed', String(control.dataset.category === category));
     for (const control of views.children) control.setAttribute('aria-pressed', String(control.dataset.mode === mode));
-    const items = people.filter(person => (!gender.value || person.gender === gender.value) && (!age.value || person.ageGroup === age.value) && (!region.value || person.region === region.value) && (person.name || '').toLocaleLowerCase('vi').includes(search.value.toLocaleLowerCase('vi')));
-    if (!items.length) gallery.append(el('p', 'Chưa có nhân vật phù hợp. Tạo nhân vật từ ảnh của bạn.', 'library-empty-state'));
-    for (const person of items) {
-      const card = button('', () => { selected = person; render(); }, 'character-card');
-      card.classList.toggle('selected', selected?.id === person.id);
-      card.setAttribute('aria-pressed', String(selected?.id === person.id));
-      const preview = el('div', undefined, 'character-card-preview');
-      preview.append(el('span', 'Đang tải ảnh…', 'character-preview-message'));
-      card.append(preview, el('strong', person.name)); gallery.append(card);
-      void readAsset(person.assetId).then(asset => {
-        if (!preview.isConnected) return;
-        if (!asset || asset.kind !== 'image' || !(asset.blob instanceof Blob)) {
-          preview.replaceChildren(el('span', 'Không tìm thấy ảnh. Chọn Chỉnh sửa để tải lại.', 'character-preview-message'));
-          return;
-        }
-        const image = el('img');
-        image.alt = person.name; image.draggable = false;
-        image.onload = () => { if (preview.isConnected) preview.replaceChildren(image); };
-        image.onerror = () => { if (preview.isConnected) preview.replaceChildren(el('span', 'Không đọc được ảnh. Chọn Chỉnh sửa để thay ảnh.', 'character-preview-message')); };
-        image.src = urlFor(asset);
-      }).catch(() => {
-        if (preview.isConnected) preview.replaceChildren(el('span', 'Chưa đọc được ảnh nhân vật.', 'character-preview-message'));
-      });
+    for (const control of selectionModes.children) control.setAttribute('aria-pressed', String(control.dataset.multiple === String(multiple)));
+    const visible = assets.filter(asset => asset.name.toLocaleLowerCase('vi').includes(search.value.toLocaleLowerCase('vi')));
+    if (!visible.length) gallery.append(el('p', 'Chưa có ảnh phù hợp trong mục này.', 'library-empty-state'));
+    for (const asset of visible) {
+      const chosen = selected.has(asset.id);
+      const card = button('', () => {
+        if (multiple) { if (selected.has(asset.id)) selected.delete(asset.id); else selected.add(asset.id); }
+        else selected = selected.has(asset.id) ? new Set() : new Set([asset.id]);
+        render();
+      }, 'character-card image-warehouse-card');
+      card.classList.toggle('selected', chosen); card.setAttribute('aria-pressed', String(chosen)); card.title = asset.name;
+      const preview = el('div', undefined, 'character-card-preview'), image = el('img');
+      image.alt = asset.name; image.draggable = false;
+      image.onerror = () => preview.replaceChildren(el('span', 'Không đọc được ảnh', 'character-preview-message'));
+      image.src = urlFor(asset); preview.append(image);
+      card.append(preview, el('strong', asset.name), el('span', chosen ? '✓' : '', 'warehouse-selection-check')); gallery.append(card);
     }
-    add.disabled = edit.disabled = !selected;
-    reference.disabled = !selected || !canReference;
-    reference.title = canReference ? 'Dùng ảnh nhân vật trong node đang chọn' : 'Chọn một node tạo ảnh/video trước khi mở thư viện';
+    count.textContent = 'Đã chọn ' + selected.size + ' ảnh';
+    clear.disabled = add.disabled = selected.size === 0;
+    reference.disabled = selected.size === 0 || !canReference;
+    reference.title = canReference ? 'Dùng các ảnh đã chọn làm tham chiếu' : 'Chọn node tạo ảnh/video trước khi mở Kho';
   }
-  function editPerson(person = null) {
-    const editDialog = el('dialog', undefined, 'character-edit-dialog'), form = el('form'), name = el('input'), notes = el('textarea'), file = el('input'),
-      personGender = el('select'), personAge = el('select'), personRegion = el('input');
-    name.value = person?.name || ''; name.required = true; name.maxLength = 100;
-    notes.value = person?.prompt || ''; notes.maxLength = 2000; notes.rows = 3;
-    file.type = 'file'; file.accept = 'image/*'; file.required = !person;
-    const filePreview = el('div', undefined, 'character-upload-preview');
-    filePreview.hidden = true;
-    let previewURL;
-    const showPreview = blob => {
-      if (previewURL) URL.revokeObjectURL(previewURL);
-      previewURL = URL.createObjectURL(blob);
-      const image = el('img'); image.src = previewURL; image.alt = 'Ảnh nhân vật đã chọn';
-      filePreview.replaceChildren(image); filePreview.hidden = false;
-    };
-    file.onchange = () => {
-      if (!file.files[0]) return;
-      showPreview(file.files[0]);
-      if (!name.value.trim()) name.value = file.files[0].name.replace(/\.[^.]+$/, '').slice(0, 100);
-    };
-    if (person?.assetId) void readAsset(person.assetId).then(asset => {
-      if (asset?.blob && editDialog.isConnected && !file.files.length) showPreview(asset.blob);
-    }).catch(() => {});
-    for (const value of ['', 'Nữ', 'Nam', 'Khác']) personGender.add(new Option(value || 'Chưa ghi', value));
-    for (const value of ['', 'Trẻ em', 'Thanh niên', 'Trung niên', 'Cao tuổi']) personAge.add(new Option(value || 'Chưa ghi', value));
-    personGender.value = person?.gender || ''; personAge.value = person?.ageGroup || ''; personRegion.value = person?.region || ''; personRegion.maxLength = 100;
-    form.append(el('h2', person ? 'Chỉnh sửa nhân vật' : 'Tạo nhân vật mới'));
-    for (const [label, control] of [['Tên nhân vật', name], ['Mô tả', notes], ['Ảnh nhân vật', file], ['Giới tính', personGender], ['Nhóm tuổi', personAge], ['Khu vực', personRegion]]) {
-      const row = el('label', label); control.setAttribute('aria-label', label); row.append(control); form.append(row);
-      if (control === file) form.append(filePreview);
-    }
-    const actions = el('div', undefined, 'project-actions'), save = el('button', 'Lưu nhân vật'); save.type = 'submit';
-    actions.append(button('Hủy', () => editDialog.close()));
-    if (person) actions.append(button('Xóa nhân vật', async () => {
-      if (!confirm('Xóa nhân vật khỏi thư viện? Ảnh gốc vẫn ở trong Kho.')) return;
-      await remove('characters', person.id); selected = null; editDialog.close(); await load();
-    }));
-    actions.append(save); form.append(actions);
-    form.onsubmit = async event => {
-      event.preventDefault(); save.disabled = true;
-      try {
-        if (!name.value.trim()) throw Error('Tên nhân vật không được để trống.');
-        let assetId = person?.assetId;
-        if (file.files[0]) assetId = (await addAsset(file.files[0], { projectId })).id;
-        if (!assetId) throw Error('Cần ảnh nhân vật.');
-        const now = new Date().toISOString();
-        const item = { ...person, id: person?.id || crypto.randomUUID(), name: name.value.trim(), prompt: notes.value.trim(), assetId, gender: personGender.value, ageGroup: personAge.value, region: personRegion.value.trim(), createdAt: person?.createdAt || now, updatedAt: now };
-        await write('characters', item); selected = item; editDialog.close(); await load();
-      } catch (error) { notice(error.message); }
-      finally { save.disabled = false; }
-    };
-    editDialog.append(form); dialog.append(editDialog);
-    editDialog.addEventListener('close', () => { if (previewURL) URL.revokeObjectURL(previewURL); editDialog.remove(); }, { once: true }); editDialog.showModal();
-  }
-  try { await load(); } catch (error) { notice(error.message); }
+  await load();
 }
 
 export async function openProjectAssetLibrary({ projectId, signal, onAdd, initialCategory = 'history' }) {
