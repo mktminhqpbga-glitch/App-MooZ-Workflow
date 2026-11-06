@@ -1,0 +1,36 @@
+name: Native macOS build and verification
+on:
+  push:
+    branches: [feat/native-macos]
+    paths: ['native/**', '.github/workflows/native-macos.yml']
+  pull_request:
+    paths: ['native/**', '.github/workflows/native-macos.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - name: Native prerequisites
+        run: |
+          swift --version
+          command -v ffmpeg || brew install ffmpeg
+      - name: Test and package native Swift app
+        run: bash native/Tools/package-macos.sh
+      - name: Verify app launch
+        run: |
+          export MOOZ_DATA_DIR="$RUNNER_TEMP/mooz-native-smoke"
+          export MOOZ_SMOKE_OUTPUT="$GITHUB_WORKSPACE/native/artifacts"
+          native/artifacts/MooZ.app/Contents/MacOS/MooZ --smoke-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MooZ-native-macOS-test-build
+          path: |
+            native/artifacts/MooZ-Native-macOS.zip
+            native/artifacts/SHA256SUMS.txt
+            native/artifacts/native-smoke.json
+            native/artifacts/native-smoke.png
+            native/artifacts/native-smoke-final.mp4
