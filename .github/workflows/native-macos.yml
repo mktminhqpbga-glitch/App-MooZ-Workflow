@@ -9,6 +9,21 @@ on:
 permissions:
   contents: read
 jobs:
+  companion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - name: Verify separate Chrome companion against fixture DOM
+        run: |
+          node native/Tests/companion-worker.cjs
+          CHROMIUM_PATH="$(node -p 'require("playwright").chromium.executablePath()')" node native/Tests/companion.browser.cjs
   native:
     runs-on: macos-15-intel
     timeout-minutes: 35
@@ -27,9 +42,10 @@ jobs:
           native/artifacts/MooZ.app/Contents/MacOS/MooZ --smoke-test
       - uses: actions/upload-artifact@v4
         with:
-          name: MooZ-native-macOS-test-build
+          name: MooZ-native-macOS-Intel-test-build
           path: |
-            native/artifacts/MooZ-Native-macOS.zip
+            native/artifacts/MooZ-Native-macOS-*.zip
+            native/artifacts/MooZ-Connect-Native.zip
             native/artifacts/SHA256SUMS.txt
             native/artifacts/native-smoke.json
             native/artifacts/native-smoke.png

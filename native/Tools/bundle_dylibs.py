@@ -1,37 +1,64 @@
 #!/usr/bin/env python3
-"""Bundle Homebrew FFmpeg's non-system dylibs; a copied executable alone is not standalone."""
+"""Bundle recursive FFmpeg dylibs; reject missing or conflicting libraries."""
 from pathlib import Path
-import hashlib, shutil, subprocess, sys
-app=Path(sys.argv[1]).resolve()
-frameworks=app/'Contents/Frameworks'
-seen=set()
+import shutil, subprocess, sys
+
+app = Path(sys.argv[1]).resolve()
+frameworks = app / 'Contents/Frameworks'
+frameworks.mkdir(parents=True, exist_ok=True)
+sources = {}
+
+def output(*args):
+    return subprocess.check_output(args, text=True)
+
 def dependencies(file):
-    return [line.strip().split(' (',1)[0] for line in subprocess.check_output(['otool','-L',str(file)],text=True).splitlines()[1:]]
-def process(file, original):
-    key=str(original.resolve())
-    if key in seen:return
-    seen.add(key)
+    return [line.strip().split(' (', 1)[0] for line in output('otool', '-L', str(file)).splitlines()[1:]]
+
+def rpaths(file):
+    lines = output('otool', '-l', str(file)).splitlines()
+    return [lines[i+2].strip().removeprefix('path ').split(' (offset ', 1)[0]
+            for i, line in enumerate(lines) if line.strip() == 'cmd LC_RPATH']
+
+def expand(value, original, executable):
+    return Path(value.replace('@loader_path', str(original.parent)).replace('@executable_path', str(executable.parent)))
+
+def resolve(name, original, executable):
+    if name.startswith('@rpath/'):
+        relative = name.removeprefix('@rpath/')
+        roots = [expand(p, original, executable) for p in rpaths(original)]
+        roots += [expand(p, executable, executable) for p in rpaths(executable)]
+        candidates = [root / relative for root in roots] + [original.parent / relative]
+    else:
+        candidates = [expand(name, original, executable)]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise RuntimeError(f'Cannot resolve {name} from {original}')
+
+def add_rpath(file, value):
+    if value not in rpaths(file):
+        subprocess.run(['install_name_tool', '-add_rpath', value, str(file)], check=True)
+
+def process(target, original, executable):
+    own_id = output('otool', '-D', str(original)).splitlines()[1:] if original.suffix == '.dylib' else []
     for name in dependencies(original):
-        if name.startswith(('/usr/lib/','/System/Library/')):continue
-        if name.startswith('@rpath/'):
-            candidate=original.parent/name.removeprefix('@rpath/')
-        elif name.startswith('@loader_path/'):
-            candidate=original.parent/name.removeprefix('@loader_path/')
-        else:candidate=Path(name)
-        if not candidate.exists():raise RuntimeError(f'Cannot resolve native dependency {name} from {original}')
-        target=frameworks/candidate.name
-        if target.exists():
-            if hashlib.sha256(target.read_bytes()).digest()!=hashlib.sha256(candidate.read_bytes()).digest() and str(candidate.resolve()) not in seen:
-                raise RuntimeError(f'Conflicting dylib name: {candidate.name}')
-        else:
-            shutil.copy2(candidate,target)
-            target.chmod(0o755)
-            subprocess.run(['install_name_tool','-id','@rpath/'+target.name,str(target)],check=True)
-            process(target,candidate)
-            subprocess.run(['install_name_tool','-add_rpath','@loader_path',str(target)],check=True)
-        subprocess.run(['install_name_tool','-change',name,'@rpath/'+target.name,str(file)],check=True)
-for tool in ['ffmpeg','ffprobe']:
-    binary=app/'Contents/Resources/bin'/tool
-    original=Path(shutil.which(tool) or '')
-    process(binary,original)
-    subprocess.run(['install_name_tool','-add_rpath','@loader_path/../../Frameworks',str(binary)],check=True)
+        if name in own_id or name.startswith(('/usr/lib/', '/System/Library/')):
+            continue
+        candidate = resolve(name, original, executable)
+        library = frameworks / candidate.name
+        if library.name in sources and sources[library.name] != candidate:
+            raise RuntimeError(f'Conflicting dylib name: {library.name}')
+        if library.name not in sources:
+            sources[library.name] = candidate
+            shutil.copy2(candidate, library)
+            library.chmod(0o755)
+            subprocess.run(['install_name_tool', '-id', '@rpath/' + library.name, str(library)], check=True)
+            process(library, candidate, executable)
+            add_rpath(library, '@loader_path')
+        subprocess.run(['install_name_tool', '-change', name, '@rpath/' + library.name, str(target)], check=True)
+
+for tool in ['ffmpeg', 'ffprobe']:
+    original = Path(shutil.which(tool)).resolve()
+    binary = app / 'Contents/Resources/bin' / tool
+    process(binary, original, original)
+    add_rpath(binary, '@loader_path/../../Frameworks')

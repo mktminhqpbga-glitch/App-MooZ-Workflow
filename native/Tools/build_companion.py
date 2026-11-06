@@ -9,6 +9,7 @@ def replace_once(text, old, new):
     return text.replace(old,new,1)
 def generic(text):
     text=text.replace("'1.9.3'","'native-2.0.0'")
+    text=replace_once(text,"({provider,types:","({nativeProtocol:1,provider,types:")
     hook="""    if(request.type==='WORKFLOW_AI_JOB_STATUS'){
       const cached=completed.get(request.requestId);
       if(cached?.result?.retryItems)cached.result.retryItems().then(result=>{cached.result=result;const {retryItems,...wire}=result;respond({ok:true,state:'done',result:{...wire,requestId:request.requestId}});},error=>respond({ok:true,state:'done',result:{ok:false,requestId:request.requestId,error:error.message}}));
@@ -53,6 +54,7 @@ def generic(text):
     text=replace_once(text,"return {ok:true,url};}","return {ok:true,url,items:[{id:'video-0',url}],expectedItems:1};}")
     return text
 def muse(text):
+    text=replace_once(text,"return {ok:true,sendProtocol:1,jobProtocol:1","return {ok:true,nativeProtocol:1,sendProtocol:1,jobProtocol:1")
     a=text.index("    if(message?.type==='MUSEFLOW_JOB_STATUS'){")
     b=text.index("    if(message?.type==='MUSEFLOW_JOB_ACK')",a)
     text=text[:a]+"""    if(message?.type==='MUSEFLOW_JOB_STATUS'){
@@ -110,7 +112,9 @@ def build(output):
                 manifest=json.loads(data);manifest['version']='2.0.0';manifest['name']='MooZ Connect Native';data=json.dumps(manifest,ensure_ascii=False,indent=2).encode()
             if entry.filename=='ai-bridge.js':data=generic((ROOT/'vendor/mooz/extension/ai-bridge.js').read_text()).encode()
             if entry.filename=='muse-bridge.js':data=muse(data.decode()).encode()
-            if entry.filename=='desktop/chrome-relay-worker.js':data=IDENTITY.encode()+data
+            if entry.filename=='desktop/chrome-relay-worker.js':
+                worker=replace_once(data.decode(),"const ALLOWED_TYPES=new Set([","const ALLOWED_TYPES=new Set(['WORKFLOW_AI_JOB_START','WORKFLOW_AI_JOB_STATUS','WORKFLOW_AI_JOB_ACK',")
+                data=IDENTITY.encode()+worker.encode()
             new.writestr(entry,data)
     print(output)
 if __name__=='__main__':

@@ -12,7 +12,7 @@ swift test -j 4
 swift run MooZ
 ```
 
-`make package` từ root tạo `.app`, ZIP và checksum trong `native/artifacts/`. Script đóng gói cả các dylib FFmpeg; không dựa vào Homebrew trên máy người nhận. Bản ad-hoc là bản kiểm thử, chưa phải Developer ID/notarized public release.
+`make package` từ root tạo `.app`, ZIP có tên kiến trúc (`x86_64`/`arm64`) và checksum trong `native/artifacts/`. Script đóng gói các dylib FFmpeg, kiểm đường dẫn load và suy ra minOS thực tế; FFmpeg của Homebrew có thể yêu cầu macOS mới hơn 13. Bản ad-hoc là bản kiểm thử, chưa phải Developer ID/notarized public release. CI hiện cấu hình Intel.
 
 ## Luồng và dữ liệu
 
@@ -28,3 +28,12 @@ swift run MooZ
 Swift core được biên dịch/kiểm thử trên Linux bằng image chính thức `swift:6.1.3-jammy` với `libsqlite3-dev`, `ffmpeg`. Build này không chứng minh giao diện AppKit/SwiftUI chạy trên Mac. Workflow native phải build/test/package/launch trên macOS trước khi có thể xác nhận app native.
 
 Xem `docs/STATUS.md` cho phạm vi và các gate còn chưa đạt. Không dùng fixture để tuyên bố đã nghiệm thu tài khoản AI thật.
+
+Companion có hai kiểm thử riêng từ root (cần Python3, unzip, Node/Playwright/Chromium):
+
+```sh
+node native/Tests/companion-worker.cjs
+CHROMIUM_PATH=/path/to/chromium node native/Tests/companion.browser.cjs
+```
+
+Lõi Swift có thể kiểm trên Linux bằng Docker image `swift:6.1.3-jammy` với `libsqlite3-dev` và `ffmpeg`; bind repo vào container, chạy `swift test -j 4` trong `native`. Cấu hình proxy/CA theo môi trường Docker của bạn. GUI chỉ chạy trên Mac.

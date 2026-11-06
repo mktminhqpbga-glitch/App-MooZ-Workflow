@@ -37,6 +37,7 @@ for native_tool in ffmpeg ffprobe; do
   cp "$native_tool_path" "$native_app/Contents/Resources/bin/$native_tool"
 done
 python3 "$native_root/Tools/bundle_dylibs.py" "$native_app"
+python3 "$native_root/Tools/verify_bundle.py" "$native_app"
 python3 "$native_root/Tools/build_companion.py"
 mkdir -p "$native_app/Contents/Resources/Companion"
 ditto -x -k "$native_root/artifacts/MooZ-Connect-Native.zip" "$native_app/Contents/Resources/Companion"
@@ -47,6 +48,7 @@ codesign --force --sign - "$native_app/Contents/Resources/bin/ffmpeg"
 codesign --force --sign - "$native_app/Contents/Resources/bin/ffprobe"
 codesign --force --deep --sign - "$native_app"
 codesign --verify --deep --strict "$native_app"
-ditto -c -k --sequesterRsrc --keepParent "$native_app" "$native_root/artifacts/MooZ-Native-macOS.zip"
-shasum -a 256 "$native_root/artifacts/MooZ-Native-macOS.zip" > "$native_root/artifacts/SHA256SUMS.txt"
+native_archive="$native_root/artifacts/MooZ-Native-macOS-$(uname -m).zip"
+ditto -c -k --sequesterRsrc --keepParent "$native_app" "$native_archive"
+shasum -a 256 "$native_archive" "$native_root/artifacts/MooZ-Connect-Native.zip" > "$native_root/artifacts/SHA256SUMS.txt"
 printf '%s\n' "$native_app" 'Ad-hoc signed local/CI build. Developer ID signing and notarization are required for a public distribution.'
