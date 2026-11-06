@@ -48,6 +48,8 @@ GitHub Actions `.github/workflows/release-mac.yml` chạy toàn bộ kiểm th�
 
 Batch có một khu làm việc, ảnh sản phẩm/nhân vật tùy chọn và queue riêng. `Thêm & tạo node` chỉ chốt kế hoạch; `Chạy hàng đợi` mới gửi AI. Job đang gửi khi gián đoạn cần đối chiếu, không tự gửi lại. Hậu kỳ thông thường xử lý local bằng WASM; TTS/Whisper cần OpenAI key phía máy chủ và có thông báo gửi dữ liệu.
 
+**Bàn giao sửa AI cho đối tác:** [Giao thức gửi–nhận, giữ tab, xếp hàng khi bận và lưu đủ kết quả](docs/RELIABLE-AI-TAB-QUEUE-RESULT-HANDOFF.md). Tài liệu chỉ rõ các điểm đang gây lỗi trong mã hiện tại, contract cần sửa và bảng nghiệm thu; không thay thế việc kiểm thử với tài khoản AI thật.
+
 Thông báo media/font bổ sung ở `vendor/mooz/THIRD-PARTY-NOTICES.md`. Đối chiếu phạm vi còn chưa xác thực ở `docs/USER-REQUEST-REVIEW.md`.
 
 ## Cấu hình Chrome máy ảo và video chiều sâu
