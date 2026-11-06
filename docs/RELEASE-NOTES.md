@@ -1,3 +1,11 @@
+# 0.4.0 · Phòng dựng và rà soát toàn app
+
+- Hai timeline độc lập cho video/nhạc; waveform giải mã thật, kéo đoạn/hai mép và nhập giây.
+- Chọn nhạc từ tệp hoặc Kho, nhạc phát từ đầu video đã cắt; lặp đúng đoạn chọn hoặc dừng khi hết đoạn.
+- Màu, volume nhạc/tiếng gốc riêng; preview và export dùng cùng renderer FFmpeg; MP4 H264/AAC mới, giữ nguồn.
+- Preview không tự lưu; xuất/tải/dùng kết quả, không dùng kết quả cũ sau đổi thiết lập; hủy xử lý.
+- Kiểm media thật bằng PCM/tần số/pixel/ffprobe, kiểm UI và app đã đóng gói. Báo cáo toàn app trong docs/APP-AUDIT-0.4.0.md, ghi rõ các adapter/kết nối thật còn thiếu.
+
 MooZ CVN 0.3.0 · relay máy ảo, video depth local và bố cục gọn.
 
 - Cài đặt có chọn local/relay, địa chỉ WSS, khóa quản trị, lưu/kiểm tra/tạo mã ghép/xóa cấu hình. Khóa giữ phía máy chủ, không hiển thị lại; không đổi kết nối trong lúc có request chạy.

@@ -3264,3 +3264,29 @@ body:has(> .cvn-studio) > .sidebar { display: none; }
 /* Selected node and its composer form one layer above neighbouring previews. */
 .cvn-node.selected { z-index: 8; }
 .generation-node > .script-node-body { background: var(--panel); color: var(--ink); text-align: left; justify-content: flex-start; }
+
+/* Phòng dựng: source-relative video and music timelines, independently scaled. */
+.finishing-workbench[open] { width:min(1400px,calc(100vw - 24px)); padding:20px; }
+.finishing-layout { display:grid; grid-template-columns:minmax(240px,.75fr) minmax(0,1.25fr); gap:24px; }
+.finishing-flow { font-size:12px; line-height:1.7; color:var(--muted); margin:0 0 18px; }
+.finishing-preview { min-width:0; }
+.finishing-preview video { max-height:430px; width:100%; }
+.finishing-preview h3,.finishing-timeline h3 { font-size:14px; margin:0 0 10px; }
+.finishing-controls { border:0; padding:0; margin:0; min-width:0; }
+.finishing-controls:disabled { opacity:.65; }
+.finishing-timeline { margin-bottom:18px; min-width:0; }
+.finishing-ruler { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-bottom:5px; }
+.finishing-track { position:relative; height:84px; border:1px solid var(--line); border-radius:8px; background:var(--bg); overflow:hidden; }
+.finishing-track canvas { width:100%; height:84px; display:block; }
+.finishing-selection { position:absolute; top:0; bottom:0; display:flex; align-items:center; justify-content:space-between; border:2px solid #4e966a; background:#73be9130; min-width:4px; cursor:grab; touch-action:none; color:var(--ink); }
+.finishing-selection > span:nth-child(2) { white-space:nowrap; overflow:hidden; font-size:11px; pointer-events:none; padding:4px; text-shadow:0 0 4px var(--panel); }
+.finishing-handle { align-self:stretch; display:flex; align-items:center; flex:0 0 15px; justify-content:center; background:#4e966a; color:white; cursor:ew-resize; }
+.finishing-handle:focus-visible { outline:3px solid var(--ink); outline-offset:-3px; }
+.finishing-range-inputs,.finishing-adjustments { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
+.finishing-range-inputs input,.finishing-adjustments input { width:100%; min-width:0; box-sizing:border-box; }
+.finishing-adjustments input[type=checkbox] { width:20px; height:20px; }
+.finishing-music-actions,.finishing-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.finishing-music-actions select { flex:1; min-width:120px; max-width:100%; }
+.finishing-status { font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
+.finishing-actions button:nth-child(2) { background:var(--accent); color:var(--ink); font-weight:600; }
+@media(max-width:850px){.finishing-layout{grid-template-columns:1fr}.finishing-preview video{max-height:260px}}

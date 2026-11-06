@@ -30,3 +30,11 @@ Giới hạn xác minh:
 - Chưa có Developer ID/notarization, không có API key hoặc tài khoản AI thật trong gói.
 - Chưa xác nhận Vercel Production; static frontend không thay máy chủ local/relay.
 - “Đầu → Cuối” và video API chưa có adapter đã xác thực; giữ vô hiệu/chặn trước khi gửi. Không giả kết quả.
+
+## Bổ sung Phòng dựng 0.4.0
+
+- `CHROMIUM_PATH=/usr/bin/chromium npm run test:all`: 25 unit checks và toàn bộ suite dự án/Canvas/Kho/queue/relay/depth/local media; thêm finishing browser.
+- `npm run package:linux:test` + `npm run test:packaged`: mở Electron đã đóng gói, chạy Phòng dựng thật cùng các luồng cũ; kiểm H264/AAC/thời lượng bằng ffprobe.
+- Finishing dùng video testsrc + track gốc, nhạc có ba tần số ở ba đoạn: 440/880/1760 Hz. Kiểm phân tích mẫu PCM: chỉ đoạn 880 Hz được chọn phát từ video zero, không lặp thì im phần sau, lặp thì tiếp tục đúng đoạn; saturation 0 tạo pixel xám. Preview không lưu result; export/cache/cancel/download và nguồn nguyên vẹn được kiểm tra.
+- Xem bố cục sáng và màn hẹp với video khoảng 41 giây và bài nhạc 194,8 giây thật; các thước dùng duration nguồn riêng. Đây là fixture, không phải tệp người dùng.
+- Native Mac còn phụ thuộc kết quả workflow phát hành của commit 0.4.0, không suy ra từ gói Linux.

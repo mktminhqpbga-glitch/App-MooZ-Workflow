@@ -29,10 +29,13 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
  await require('./composer-overlap-checks.cjs').checkComposerOverlap(page);
  await require('./relay-settings-checks.cjs').checkRelaySettings(page);
  await require('./relay-settings-checks.cjs').checkRelayBusyGuard(page);
+ const musicFixture=path.join(profile,'music.wav');execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=880:duration=4',musicFixture]);
+ const finishing=await require('./finishing-checks.cjs').checkFinishing(page,{video:'data:video/mp4;base64,'+(await readFile(fixture)).toString('base64'),music:'data:audio/wav;base64,'+(await readFile(musicFixture)).toString('base64')},{download:false});
+ const finalFile=path.join(profile,'finished.mp4');await writeFile(finalFile,Buffer.from(finishing.looped.split(',')[1],'base64'));const finishProbe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-show_format','-of','json',finalFile],{encoding:'utf8'}));assert.equal(finishProbe.streams.find(s=>s.codec_type==='audio').codec_name,'aac');assert.ok(Math.abs(+finishProbe.format.duration-1)<.08);
  const depthOutput=await require('./depth-video-checks.cjs').checkDepthVideo(page,'data:video/mp4;base64,'+(await readFile(fixture)).toString('base64'),{download:false});
  const depthFile=path.join(profile,'depth.mp4');await writeFile(depthFile,Buffer.from(depthOutput.data.split(',')[1],'base64'));
  const depthProbe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-show_format','-of','json',depthFile],{encoding:'utf8'}));assert.equal(depthProbe.streams.find(stream=>stream.codec_type==='video').codec_name,'h264');assert.ok(Math.abs(+depthProbe.format.duration-1)<.08);
  assert.deepEqual(errors,[]);
- console.log('PASS packaged Electron application: embedded secured server, sandboxed renderer, Settings downloads ZIP, single fluid workspace, post-production route and actual bundled WASM MP4 processing, every dock group, stable Canvas cleanup/composer stacking, private relay Settings with busy-job guard, and real bundled MiDaS depth MP4.');
+ console.log('PASS packaged Electron application: embedded secured server, sandboxed renderer, Settings downloads ZIP, single fluid workspace, post-production route and actual bundled WASM MP4 processing, every dock group, stable Canvas cleanup/composer stacking, private relay Settings with busy-job guard, real bundled MiDaS depth MP4, and actual Phòng dựng waveform/trim/mix/color preview and H264/AAC export.');
  }finally{await application?.close();await rm(profile,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -79,3 +79,7 @@ Danh sách này theo các yêu cầu trong cuộc trao đổi; cập nhật cùn
 - Công cụ ảnh và chỉ dẫn hiệu ứng có điều kiện chọn node rõ ràng. Sửa tìm loại node để nút Đóng không bị lỗi khi không có dataset tìm kiếm.
 - Thêm tests/dock-checks.cjs: kiểm tra hành động trong từng nhóm, popup pinned, blank click giữ shell/viewport/route, giữ editor ảnh qua cleanup trễ. Chạy sáng/tối trên trình duyệt và chạy trong app đóng gói trên workflow Mac.
 - Không tái hiện được việc đổi route về home bằng click vùng trống trong bản trình duyệt cũ; test mới tái tạo và ngăn lỗi cleanup của editor cũ gỡ chế độ của Canvas đang sống. Chưa coi kiểm thử DOM là bằng chứng đã thử mọi GPU của máy khách.
+
+## Phòng dựng 0.4.0
+
+Một video và nhạc tùy chọn, timeline độc lập/waveform, drag/resize/giây, màu/volume, preview và MP4 H264/AAC thật; kiểm bằng PCM/pixel/ffprobe. Rà soát toàn app và 18 tồn đọng/giới hạn trong [APP-AUDIT-0.4.0.md](APP-AUDIT-0.4.0.md).

@@ -1291,7 +1291,7 @@ export async function mountStudio(host, id) {
       fullscreen.append(icon("expand"));
       fullscreen.title = "Xem video toàn màn hình";
       fullscreen.setAttribute("aria-label", "Xem video toàn màn hình");
-      const post = button("Hậu kỳ", async () => { const asset = await readAsset(n.data.assetId); return openPostWorkbench(asset, { onResult: asset => addAssetNode(asset) }); });
+      const post = button("Hậu kỳ", async () => { const asset = await readAsset(n.data.assetId); return openPostWorkbench(asset, { signal: abort.signal, onResult: asset => { if (!disposed) return addAssetNode(asset); } }); });
       const depth = button("Tạo video chiều sâu", async () => {
         const asset = await readAsset(n.data.assetId);
         return openDepthWorkbench(asset, { projectId: project.id, signal: abort.signal, onResult: output => { if (!disposed) return addAssetNode(output); } });

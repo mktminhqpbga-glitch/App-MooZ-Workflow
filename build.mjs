@@ -38,6 +38,8 @@ const files = [
   "image-workbench.js",
   "icons.js",
   "post-workbench.js",
+  "finishing-workbench.js",
+  "core/finishing-plan.js",
   "downloads/MooZ-Connect.zip",
   "downloads/release.json",
   "core/queue-plan.js",

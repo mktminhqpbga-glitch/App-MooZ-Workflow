@@ -55,3 +55,7 @@ Thông báo media/font bổ sung ở `vendor/mooz/THIRD-PARTY-NOTICES.md`. Đố
 Bản 0.3.0 có mục **Kết nối Chrome máy ảo** trong Cài đặt: chọn chế độ, nhập WSS/key, kiểm tra, lưu và tạo mã. Dịch vụ relay phải được triển khai riêng; xem `docs/RELAY-SETUP.md`.
 
 Thanh công cụ video có **Tạo video chiều sâu**: model MiDaS Small suy luận local, giữ nguồn và xuất MP4 xám. Model/runtime chuẩn bị khi build hoặc package, có kiểm SHA256, không cần Python trên máy người dùng. Xem `docs/DEPTH-VIDEO.md` và `vendor/depth/SOURCE.json`; giữ các giấy phép MIT đi kèm.
+
+Phòng dựng (0.4.0): mở **Hậu kỳ** trên video Canvas hoặc chọn video tại mục Hậu kỳ. Chọn/đổi nhạc từ tệp hoặc Kho, kéo vùng xanh/hai mép trên hai timeline độc lập hoặc nhập giây, chỉnh màu và âm lượng riêng. **Xem & nghe thử** dựng tệp bằng đúng renderer; **Xuất MP4 hoàn chỉnh** lưu H264/AAC vào Kho Kết quả. Nhạc luôn bắt đầu ở đầu đoạn video đã cắt, lặp chỉ lặp đoạn nhạc chọn; nguồn giữ nguyên. Công cụ hậu kỳ cũ ở **Công cụ hậu kỳ khác**.
+
+Tình trạng toàn app, giới hạn, phần còn thiếu và thứ tự xử lý: [APP-AUDIT-0.4.0.md](docs/APP-AUDIT-0.4.0.md).

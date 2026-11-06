@@ -27,7 +27,8 @@
   "adaptations": [
     "canvas-image-editor.js: output adapter renamed to MooZCVNMediaEditorTarget",
     "media-studio.js: extension URLs adapted to same-origin web assets; direct credential speech helpers not exposed; speech goes through server.",
-    "relay-server.cjs: upstream relay-server/server.cjs copied unchanged for compatible deployment and real TLS/WSS integration tests."
+    "relay-server.cjs: upstream relay-server/server.cjs copied unchanged for compatible deployment and real TLS/WSS integration tests.",
+    "media-studio.js: finishing operation renders selected video/music segments together, selected-only audio loop, colors and independent volumes, using core/finishing-plan.js."
   ],
   "additional_source_commit": "09d54eb8f0211679a4ea483c16f26b123cd23050"
 }

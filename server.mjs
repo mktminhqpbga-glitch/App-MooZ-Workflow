@@ -99,6 +99,8 @@ const staticFiles = new Set([
   "image-workbench.js",
   "icons.js",
   "post-workbench.js",
+  "finishing-workbench.js",
+  "core/finishing-plan.js",
   "relay-settings-ui.js",
   "depth-worker.js",
   "depth-workbench.js",

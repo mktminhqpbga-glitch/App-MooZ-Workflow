@@ -1,3 +1,4 @@
+import { finishingPlan } from '../../core/finishing-plan.js';
 /* Local media processing; remote speech requests occur only on explicit execution. */
 (()=>{
  const video={id:'video',label:'Video',type:'video'},audio={id:'audio',label:'Âm thanh',type:'audio'},text={id:'text',label:'Văn bản',type:'text'};
@@ -82,6 +83,16 @@
     if(!base.audio)throw Error('Video nguồn không có luồng âm thanh để tách.');
     args.push('-map','0:a:0','-vn','-c:a','libmp3lame','-b:a','192k','-ar','48000','-y','/audio.mp3');progress('Đang tách âm thanh MP3…');
     const code=await ffmpeg.exec(args,-1,{signal});if(code!==0)throw Error(tail.join(' ').slice(-900)||'Không tách được âm thanh.');const bytes=await ffmpeg.readFile('/audio.mp3','binary',{signal});if(!bytes.length)throw Error('Âm thanh kết quả trống.');return {blob:new Blob([bytes],{type:'audio/mpeg'}),kind:'audio',duration:base.duration,report:'Đã tách âm thanh thành MP3; '+base.duration.toFixed(2)+' giây. Video nguồn được giữ nguyên.'};
+   }else if(type==='finishing'){
+    if(videos.length!==1||audios.length>1||images.length)throw Error('Phòng dựng cần một video và tối đa một bài nhạc.');
+    const plan=finishingPlan(settings,base.duration,audios.length?info[1].duration:null);outputDuration=plan.duration;
+    filters.push(`[0:v]trim=start=${plan.videoStart}:end=${plan.videoEnd},setpts=PTS-STARTPTS,${normalize},eq=brightness=${plan.brightness}:contrast=${plan.contrast}:saturation=${plan.saturation}[v]`);
+    const tracks=[];
+    if(base.audio){filters.push(`[0:a]atrim=start=${plan.videoStart}:end=${plan.videoEnd},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${plan.originalVolume},apad,atrim=duration=${plan.duration}[original]`);tracks.push('[original]');}
+    if(audios.length){const loop=plan.loop?`,aloop=loop=-1:size=${Math.max(1,Math.round((plan.musicEnd-plan.musicStart)*48000))}`:'';filters.push(`[1:a]atrim=start=${plan.musicStart}:end=${plan.musicEnd},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo${loop},volume=${plan.musicVolume},apad,atrim=duration=${plan.duration},asetpts=PTS-STARTPTS[music]`);tracks.push('[music]');}
+    if(tracks.length===2)filters.push(`${tracks.join('')}amix=inputs=2:duration=longest:normalize=0[a]`);else if(tracks.length)filters.push(`${tracks[0]}anull[a]`);
+    args.push('-filter_complex_threads','1','-filter_complex',filters.join(';'),'-map','[v]');if(tracks.length)args.push('-map','[a]');else args.push('-an');args.push('-t',String(plan.duration));
+    report=`Đã dựng ${plan.duration.toFixed(2)} giây; video ${plan.videoStart}–${plan.videoEnd}s`+(audios.length?`; nhạc ${plan.musicStart}–${plan.musicEnd}s phát từ đầu đoạn video${plan.loop?', lặp đoạn đã chọn':', hết đoạn thì dừng'}`:'; không thêm nhạc')+'. Nguồn được giữ nguyên.';
    }else if(type==='videoTrim'){
     const plan=editPlan(type,settings,base.duration);args.push('-vf',`${normalize},trim=start=${plan.start}:end=${plan.end},setpts=PTS-STARTPTS`,'-map','0:v:0');
     if(base.audio)args.push('-af',`atrim=start=${plan.start}:end=${plan.end},asetpts=PTS-STARTPTS`,'-map','0:a:0');args.push('-t',String(plan.duration));outputDuration=plan.duration;report=`Đã cắt từ ${plan.start} đến ${plan.end} giây; kết quả ${plan.duration.toFixed(2)} giây.`;
