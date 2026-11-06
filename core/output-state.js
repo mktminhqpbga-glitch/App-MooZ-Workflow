@@ -3,7 +3,7 @@ function digest(text) { let a=2166136261,b=2246822519;for(let i=0;i<text.length;
 function canonical(value) { if (Array.isArray(value)) return value.map(canonical); if(value && typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])); return value; }
 export function outputKey(graph, id, configurationOnly = false) {
  const ids=new Set([id]);let changed=true;while(changed){changed=false;for(const edge of graph.edges)if(ids.has(edge.target)&&!ids.has(edge.source)){ids.add(edge.source);changed=true;}}
- const nodes=graph.nodes.filter(node=>ids.has(node.id)).map(node=>{const data={...node.data};delete data.outputKey;delete data.customName;delete data.resultAssets;if(generated(node.type)&&(configurationOnly||node.id===id)){delete data.assetId;delete data.text;}return {id:node.id,type:node.type,data};}).sort((a,b)=>a.id.localeCompare(b.id));
+ const nodes=graph.nodes.filter(node=>ids.has(node.id)).map(node=>{const data={...node.data};delete data.outputKey;delete data.tabBinding;delete data.customName;delete data.resultAssets;if(generated(node.type)&&(configurationOnly||node.id===id)){delete data.assetId;delete data.text;}return {id:node.id,type:node.type,data};}).sort((a,b)=>a.id.localeCompare(b.id));
  const edges=graph.edges.filter(edge=>ids.has(edge.source)&&ids.has(edge.target)).map(edge=>({...edge}));
  return digest(JSON.stringify(canonical({nodes,edges})));
 }

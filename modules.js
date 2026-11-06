@@ -1,3 +1,10 @@
+import {mountCustomProviders} from './custom-providers-ui.js';
+import {isAPIProvider} from './client-api.js';
+import {mountMaintenance} from './maintenance-ui.js';
+import {generationCapabilities} from './core/provider-capabilities.js';
+import {mountAPISettings} from './api-settings-ui.js';
+import {compileRecipe} from './core/workflow-recipe.js';
+import {openFlowEditor,openFlowLibrary} from './flow-workbench.js';
 import { mountRelaySettings } from "./relay-settings-ui.js";
 import { mountAssistantSettings } from "./assistant-ui.js";
 import { icon } from "./icons.js";
@@ -27,7 +34,7 @@ import {
 } from "./core/runner.js";
 import { prepareJobs } from "./core/queue-storage.js";
 import { splitPrompts, uniqueTags, validateImage, limits } from "./core/queue-plan.js";
-import { buildFlow, buildContinuation } from "./core/flow-plan.js";
+import { buildFlow, buildContinuation, buildFirstLast } from "./core/flow-plan.js";
 import { queueRunner } from "./core/queue-runner.js";
 import { resumeJob } from "./core/runner.js";
 import { emptyGraph } from "./core/graph.js";
@@ -304,6 +311,9 @@ export async function mountSettings(host) {
   preferences.append(el("h2", "Không gian và giao diện"), identity, appearanceLink);
   host.append(preferences);
   mountAssistantSettings(host);
+  const cleanupAPI=mountAPISettings(host);
+  const cleanupCustom=mountCustomProviders(host);
+  const cleanupMaintenance=mountMaintenance(host);
   const downloads = el('section', undefined, 'settings-panel app-downloads');
   downloads.append(el('h2','Ứng dụng & extension'));
   const installed = el('p', globalThis.moozDesktop ? 'MooZ CVN ' + globalThis.moozDesktop.version + ' · ' + globalThis.moozDesktop.platform + ' ' + globalThis.moozDesktop.arch : 'Bạn đang dùng bản web. Bản desktop có máy chủ kết nối AI local.');
@@ -375,7 +385,7 @@ export async function mountSettings(host) {
   provider.setAttribute("aria-label", "AI cần kiểm tra");
   tab.setAttribute("aria-label", "Tab cần kiểm tra");
   for (const p of providerList.filter(
-    (p) => !["google", "openai"].includes(p.id),
+    (p) => !isAPIProvider(p.id),
   ))
     provider.add(new Option(p.name, p.id));
   async function refreshTabs() {
@@ -448,6 +458,9 @@ export async function mountSettings(host) {
   await refresh();
   return () => {
     cleanupRelay();
+    cleanupAPI();
+    cleanupCustom();
+    cleanupMaintenance();
     code.value = "";
   };
 }
@@ -491,16 +504,17 @@ export async function mountBatch(host, kind) {
   };
   updateConnectionStatus();
   for (const [label, glyph, action] of [
-    ["Văn bản", "text", () => { workspace.classList.add("batch-text-mode"); for (const form of workspace.querySelectorAll('form')) form.querySelector('.batch-image-picker > button[aria-label="Bỏ ảnh đầu vào"]')?.click(); }],
+    ["Văn bản", "text", () => { flowMode="normal";workspace.classList.add("batch-text-mode"); for (const form of workspace.querySelectorAll('form')) form.querySelector('.batch-image-picker > button[aria-label="Bỏ ảnh đầu vào"]')?.click(); }],
     ["Ảnh sản phẩm", "image", () => { flowMode="normal"; workspace.classList.remove("batch-text-mode"); workspace.classList.remove("batch-extension-mode"); }],
-    ["Đầu → Cuối", "frame", null],
+    ["Đầu → Cuối", "frame", kind==="video"?()=>{flowMode="firstLast";workspace.classList.remove("batch-text-mode","batch-extension-mode");workspace.classList.add("batch-first-last-mode");}:null],
     ["Nối dài", "video", kind === "video" ? () => { flowMode="extend"; workspace.classList.add("batch-extension-mode"); } : null],
-    ["Luồng đã lưu", "folder", () => { workspace.querySelector('[aria-label="Luồng mẫu"]')?.focus(); }],
-    ["Luồng xử lý", "sliders", () => { queuePanel.scrollIntoView({ behavior: "smooth", block: "nearest" }); }],
+    ["Luồng đã lưu", "folder", () => openFlowLibrary({kind,onSelect:selectFlow,onChanged:updateFlow})],
+    ["Luồng xử lý", "sliders", () => openFlowEditor({kind,template:templates.find(t=>t.id===workspace.querySelector('[aria-label="Luồng mẫu"]')?.value),onSaved:async item=>{await updateFlow(item);selectFlow(item);}})],
     ["Kho media", "folder", () => { workspace.classList.remove("batch-text-mode"); workspace.querySelector('[aria-label="Chọn ảnh đầu vào"]')?.click(); }],
   ]) {
     const control = button("", () => {
       action?.();
+      workspace.classList.toggle("batch-first-last-mode",flowMode==="firstLast");for(const select of workspace.querySelectorAll('[aria-label="AI hàng loạt"]')){for(const option of select.options)option.disabled=flowMode==="firstLast"&&option.value&&!['google','fal'].includes(option.value);if(select.selectedOptions[0]?.disabled){select.value="";select.dispatchEvent(new Event("change"));}}
       for (const item of groups.children) item.setAttribute("aria-pressed", String(item === control));
     });
     control.append(icon(glyph), el("span", label));
@@ -513,6 +527,8 @@ export async function mountBatch(host, kind) {
   const assets = (await Promise.all([list("inputs"), list("results")])).flat().filter(a => a.kind === "image"),
     templates = await list("templates");
   const assetURLs = new Map(assets.map(asset => [asset.id, URL.createObjectURL(asset.blob)]));
+  async function updateFlow(item){const index=templates.findIndex(t=>t.id===item.id);if(index>=0)templates.splice(index,1);if(!item.deleted)templates.push(item);for(const select of workspace.querySelectorAll('[aria-label="Luồng mẫu"]')){const old=select.value;select.replaceChildren(new Option('Luồng một bước',''));for(const t of templates)select.add(new Option(t.name,t.id));select.value=templates.some(t=>t.id===old)?old:'';}}
+  function selectFlow(item){const select=workspace.querySelector('[aria-label="Luồng mẫu"]');if(select){select.value=item.id;select.dispatchEvent(new Event('change'));if(item.recipe){const form=select.closest('form');for(const[label,value]of [['Số cảnh',item.recipe.scenes],['Tỷ lệ khung',item.recipe.size],['Thời lượng video',item.recipe.duration??''],['AI hàng loạt',item.recipe.provider]]){const input=form.querySelector('[aria-label="'+label+'"]');if(input&&[...input.options].some(o=>o.value===String(value))){input.value=value;input.dispatchEvent(new Event('change'));}}}notice('Đã chọn luồng '+item.name+'. Xếp tác vụ để chốt đầu vào; chưa gửi AI.');}}
   let availableProviders = await connectedAI(kind).catch(() => []);
   const queueControls = el('div', undefined, 'batch-queue-controls'), concurrency = el('select'), queueState = el('small');
   concurrency.setAttribute('aria-label', 'Số tác vụ song song');
@@ -622,6 +638,7 @@ export async function mountBatch(host, kind) {
     for (const r of ["1:1", "1:2", "2:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21"]) ratio.add(new Option(r, r));
     ratio.value = "16:9"; ratio.hidden = true;
     ratio.setAttribute("aria-label", "Tỷ lệ khung");
+    const endFrame=el('select'),firstLast=el('section',undefined,'batch-first-last-field'),endChoices=el('div',undefined,'batch-image-choices');endFrame.hidden=true;endFrame.setAttribute('aria-label','Ảnh khung cuối');endFrame.add(new Option('Chọn ảnh khung cuối…',''));for(const a of assets){endFrame.add(new Option(a.name,a.id));const choice=button('',()=>{endFrame.value=a.id;for(const item of endChoices.children)item.setAttribute('aria-pressed',String(item===choice));}),image=el('img');image.src=assetURLs.get(a.id);image.alt=a.name;choice.setAttribute('aria-label','Khung cuối '+a.name);choice.append(image);endChoices.append(choice);}firstLast.append(el('h3','Đầu → Cuối'),el('p','Chọn khung đầu ở Ảnh sản phẩm; chọn khung cuối dưới đây. Cần Veo API hoặc fal đã kết nối. Google Veo cần 8 giây, 16:9/9:16.'),endFrame,endChoices);form.append(firstLast);
     const extensionField=el('section',undefined,'batch-extension-field'), extensionVideo=el('select'),targetDuration=el('input');extensionVideo.setAttribute('aria-label','Video cần nối dài');targetDuration.type='number';targetDuration.value=30;targetDuration.min=.1;targetDuration.step=.1;targetDuration.setAttribute('aria-label','Thời lượng mục tiêu');
     extensionVideo.add(new Option('Chọn video nguồn…',''));for(const asset of await listAssets())if(asset.kind==='video')extensionVideo.add(new Option(asset.name,asset.id));
     extensionField.append(el('label','Video nguồn'),extensionVideo,el('label','Thời lượng mục tiêu (giây)'),targetDuration,el('p','Dùng frame cuối thật làm ảnh tham chiếu cho đoạn tiếp theo, rồi ghép. Nếu clip AI trả về quá ngắn, dừng và giữ các đoạn đã lưu.'));
@@ -644,7 +661,7 @@ export async function mountBatch(host, kind) {
           for (const item of group.children) item.setAttribute("aria-pressed", String(item === tile));
           updateGenerationSummary();
         });
-        tile.setAttribute("aria-pressed", String(String(id) === String(value)));
+        tile.dataset.value=id;tile.setAttribute("aria-pressed", String(String(id) === String(value)));
         if (ratios) {
           tile.setAttribute("aria-label", "Khung " + label);
           const shape = el("span", undefined, "ratio-shape"), [width, height] = id.split(":").map(Number);
@@ -674,7 +691,7 @@ export async function mountBatch(host, kind) {
     const duration = el("select");
     duration.setAttribute("aria-label", "Thời lượng video");
     duration.add(new Option("Không chọn thời lượng", ""));
-    for (const d of [5, 10, 15, 30, 40]) duration.add(new Option(d + " giây", d));
+    for (const d of [4, 5, 6, 8, 10, 15, 30, 40]) duration.add(new Option(d + " giây", d));
     duration.hidden = kind !== "video";
     let refreshRevision = 0, tabProvider = "";
     async function refresh() {
@@ -684,7 +701,7 @@ export async function mountBatch(host, kind) {
       tabs.replaceChildren(new Option("Đang tải tab…", ""));
       tabs.disabled = true;
       if (!selectedProvider) { tabs.replaceChildren(new Option("Chọn AI trước", "")); return; }
-      if (["google", "openai"].includes(selectedProvider)) {
+      if (isAPIProvider(selectedProvider)) {
         tabs.replaceChildren(new Option("Kết nối API · không cần tab", ""));
         updateConnectionStatus();
         return;
@@ -706,7 +723,8 @@ export async function mountBatch(host, kind) {
         notice(e.message);
       } finally { if (revision === refreshRevision && alive) { tabs.disabled = false; updateConnectionStatus(); } }
     }
-    provider.onchange = () => void refresh();
+    function applyGenerationCaps(){const caps=generationCapabilities(provider.value,kind);for(const option of ratio.options)option.disabled=!!caps&&!caps.ratios.includes(option.value);if(ratio.selectedOptions[0]?.disabled)ratio.value=caps.ratios[0];for(const[key,allowed]of [['quality',caps?.qualities],['resolution',caps?.resolutions],['background',caps?.backgrounds]])if(allowed&&!allowed.includes(generation[key]))generation[key]=allowed[0];for(const option of duration.options)option.disabled=!!caps?.durations&&option.value!==''&&!caps.durations.includes(Number(option.value));if(duration.selectedOptions[0]?.disabled)duration.value=String(caps.durations[0]);const groups={'Chất lượng':['quality',caps?.qualities],'Độ phân giải':['resolution',caps?.resolutions],'Nền ảnh':['background',caps?.backgrounds],'Tỷ lệ khung':['size',caps?.ratios]};for(const group of generationPanel.querySelectorAll('[role=group]')){const entry=groups[group.getAttribute('aria-label')];if(!entry)continue;for(const tile of group.children){tile.disabled=!!entry[1]&&!entry[1].includes(tile.dataset.value);tile.setAttribute('aria-pressed',String(tile.dataset.value===(entry[0]==='size'?ratio.value:String(generation[entry[0]]))));}}generationPanel.querySelector('small').textContent=caps?.note||'Các thông số là yêu cầu đầu ra; giới hạn thực phụ thuộc model trên tab AI.';updateGenerationSummary();}
+    provider.onchange = () => {applyGenerationCaps();void refresh();};
     const submit = el("button", "Thêm & tạo node");
     submit.type = "submit";
     const refreshTabButton = button("↻", async () => {
@@ -755,22 +773,27 @@ export async function mountBatch(host, kind) {
     connectionRow.setAttribute('aria-label','Ảnh, luồng mẫu, AI và tab');
     promptCount.after(connectionRow);
     for (const control of [source,template,provider,tabs]) connectionRow.append(control.closest('.batch-field'));
+    connectionRow.after(firstLast);
     const tabControls=el('div',undefined,'batch-tab-controls');tabs.before(tabControls);tabControls.append(tabs,refreshTabButton);
     form.onsubmit = async event => {
       event.preventDefault(); submit.disabled = true;
-      const selected = { modeType:flowMode, extensionVideo:extensionVideo.value, targetDuration:Number(targetDuration.value), text: prompts.value, mode: splitMode.value, copies: kind === 'image' ? generation.count : 1, assets: [...assets], sourceId: source.value, characterIds: [...characterIds], provider: provider.value, tabId: tabs.value && tabs.value !== 'auto' ? Number(tabs.value) : null, autoTab: tabs.value === 'auto', chatURL: tabs.selectedOptions[0]?.dataset.url || null, kind, ratio: ratio.value, duration: duration.value === '' ? null : Number(duration.value), generation: { ...generation }, scenes: Number(sceneCount.value), createImages: makeImages.checked, negative: negative.value, template: template.value };
+      const selected = { modeType:flowMode, lastFrame:endFrame.value, extensionVideo:extensionVideo.value, targetDuration:Number(targetDuration.value), text: prompts.value, mode: splitMode.value, copies: kind === 'image' ? generation.count : 1, assets: [...assets], sourceId: source.value, characterIds: flowMode==='firstLast'?[endFrame.value].filter(Boolean):[...characterIds], provider: provider.value, tabId: tabs.value && tabs.value !== 'auto' ? Number(tabs.value) : null, autoTab: tabs.value === 'auto', chatURL: tabs.selectedOptions[0]?.dataset.url || null, kind, ratio: ratio.value, duration: duration.value === '' ? null : Number(duration.value), generation: { ...generation }, scenes: Number(sceneCount.value), createImages: makeImages.checked, negative: negative.value, template: template.value };
       try {
+        if(selected.modeType==='firstLast'){if(!['google','fal'].includes(selected.provider))throw Error('Đầu → Cuối cần Google Veo API hoặc fal.');if(!selected.sourceId||!selected.lastFrame||selected.sourceId===selected.lastFrame)throw Error('Chọn hai ảnh đầu và cuối khác nhau.');if(characterIds.size)throw Error('Bỏ chọn ảnh nhân vật bổ sung khi dùng hai khung đầu/cuối.');}
         if (!selected.provider) throw Error('Chọn AI đang kết nối trước khi chuẩn bị.');
-        if (!['openai','google'].includes(selected.provider) && !tabs.value) throw Error('Chọn tab đang kết nối trước khi xếp tác vụ.');
-        const templateGraph = selected.template ? templates.find(item => item.id === selected.template)?.graph : null;
+        if (!isAPIProvider(selected.provider) && !tabs.value) throw Error('Chọn tab đang kết nối trước khi xếp tác vụ.');
+        const selectedTemplate=selected.template?templates.find(item=>item.id===selected.template):null;
+        const templateGraph = selectedTemplate?.graph || null;
         if (selected.template && !templateGraph) throw Error('Không tìm thấy luồng mẫu.');
         const jobs = await prepareJobs({ ...selected, graph: async plan => {
+          if(selected.modeType==='firstLast')return buildFirstLast({first:selected.sourceId,last:selected.lastFrame,prompt:plan.prompt,references:plan.references,size:selected.ratio,duration:selected.duration??8,...selected.generation});
           if(selected.modeType==='extend'){
             const source=await readAsset(selected.extensionVideo);if(!source||source.kind!=='video')throw Error('Chọn video thật để nối dài.');
             const video=document.createElement('video'),url=URL.createObjectURL(source.blob);let measured;
             try{measured=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Không đọc được thời lượng video nguồn.')),15000);video.onloadedmetadata=()=>{clearTimeout(timer);resolve(video.duration);};video.onerror=()=>{clearTimeout(timer);reject(Error('Video nguồn không giải mã được.'));};video.src=url;});}finally{video.removeAttribute('src');video.load();URL.revokeObjectURL(url);}
             return buildContinuation({source,sourceDuration:measured,targetDuration:selected.targetDuration,duration:selected.duration,prompt:plan.prompt,references:plan.references,size:selected.ratio,...selected.generation,negative:selected.negative});
           }
+          if(selectedTemplate?.recipe)return compileRecipe(selectedTemplate.recipe,{prompt:plan.prompt,references:plan.references,negative:selected.negative,generation:selected.generation,size:selected.ratio,duration:selected.duration});
           if (!templateGraph) return buildFlow({ kind, prompt: plan.prompt, references: plan.references, scenes: selected.scenes, createImages: selected.createImages, negative: selected.negative, size: selected.ratio, duration: selected.duration, ...selected.generation });
           const graph = structuredClone(templateGraph), first = graph.nodes.find(node => node.type.startsWith('generate'));
           if (!first) throw Error('Mẫu chưa có bước AI.');

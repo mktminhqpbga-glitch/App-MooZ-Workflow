@@ -151,7 +151,7 @@ const { chromium } = require("playwright"),
     assert.equal(await imageNode.locator(".inline-composer").isVisible(), true);
     assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), true);
     await imageNode.locator(".inline-settings summary").click();
-    for (const ratio of ["9:16", "1:1", "21:9"]) {
+    for (const ratio of ["2:3", "1:1", "3:2"]) {
       await imageNode.getByRole("button", { name: "Khung " + ratio, exact: true }).click();
       const measured = await imageNode.locator(".cvn-node-body").evaluate(e => e.offsetWidth / e.offsetHeight);
       const [w, h] = ratio.split(":").map(Number);
@@ -169,7 +169,7 @@ const { chromium } = require("playwright"),
     // Wait for the debounced project write before verifying restoration.
     let saved = false;
     for (let attempt=0;attempt<50;attempt++) {
-      saved=await page.evaluate(async()=>{const {ProjectRepository}=await import('./core/projects.js');return(await new ProjectRepository().get(location.hash.split('/').pop())).graph.nodes.find(n=>n.type==='generateImage').data.size==='21:9';});
+      saved=await page.evaluate(async()=>{const {ProjectRepository}=await import('./core/projects.js');return(await new ProjectRepository().get(location.hash.split('/').pop())).graph.nodes.find(n=>n.type==='generateImage').data.size==='3:2';});
       if(saved)break;await page.waitForTimeout(50);
     }
     assert.equal(saved,true,'latest frame ratio is durably stored');
@@ -178,7 +178,7 @@ const { chromium } = require("playwright"),
     assert.equal(await page.locator(".inline-composer:visible").count(), 0);
     assert.equal(await page.locator(".cvn-image-toolbar").isVisible(), false);
     const restored = await imageNode.locator(".cvn-node-body").evaluate(e => e.offsetWidth / e.offsetHeight);
-    assert.ok(Math.abs(restored - 21 / 9) < .03);
+    assert.ok(Math.abs(restored - 3 / 2) < .03);
     assert.equal(await imageNode.locator("img").evaluate(e => e.naturalWidth), 640);
 
     assert.equal(

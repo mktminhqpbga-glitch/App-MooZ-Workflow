@@ -1,3 +1,4 @@
+import {loadCharacterSamples} from './core/character-samples.js';
 import { el, button, notice } from './client-api.js';
 import { icon } from './icons.js';
 import { list, readAsset, write, remove, addAsset } from './core/storage.js';
@@ -5,6 +6,7 @@ import { list, readAsset, write, remove, addAsset } from './core/storage.js';
 function libraryShell(className, title, signal) {
   const dialog = el('dialog', undefined, 'canvas-library ' + className),
     header = el('div', undefined, 'canvas-library-header'), close = button('', () => dialog.close()), urls = new Map();
+  dialog.setAttribute('aria-label',title);
   close.append(icon('close')); close.setAttribute('aria-label', 'Đóng');
   header.append(el('h2', title), close); dialog.append(header);
   document.body.append(dialog);
@@ -28,7 +30,7 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
   search.type = 'search'; search.placeholder = 'Tìm ảnh trong Kho…'; search.setAttribute('aria-label', 'Tìm ảnh trong Kho'); search.oninput = render;
   upload.type = 'file'; upload.accept = 'image/*'; upload.multiple = true; upload.hidden = true; upload.setAttribute('aria-label', 'Tải ảnh vào Kho');
   const tabButtons = [];
-  for (const [value, name] of [['inputs', 'Đầu vào'], ['results', 'Kết quả']]) {
+  for (const [value, name] of [['inputs', 'Đầu vào'], ['results', 'Kết quả'], ['samples','Mẫu có giấy phép']]) {
     const control = button(name, () => { category = value; void load(); });
     control.dataset.category = value; tabs.append(control); tabButtons.push(control);
   }
@@ -51,11 +53,13 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
     if (picked.length) dialog.close();
   }), clear = button('Bỏ chọn', () => { selected.clear(); render(); });
   footer.append(uploadButton, count, clear, add, reference);
-  dialog.append(tabs, toolbar, gallery, footer, upload);
+  const credit=el('p',undefined,'character-license');credit.append(el('span','Minh họa Adventurer · Lisa Wischofsky · '));const license=el('a','CC BY 4.0');license.href='https://creativecommons.org/licenses/by/4.0/';license.target='_blank';license.rel='noopener';credit.append(license,el('span',' · Biến thể DiceBear, đã đổi nền và chuyển PNG. Khi chia sẻ ảnh hoặc bản chỉnh sửa, ghi công và kèm giấy phép.'));credit.hidden=true;
+  dialog.append(tabs, toolbar, credit, gallery, footer, upload);
   async function selectedAssets() {
     const items = [];
     for (const id of selected) {
-      const asset = await readAsset(id);
+      let asset = await readAsset(id);
+      if(!asset&&id.startsWith('sample-adventurer-')){const sample=(await loadCharacterSamples()).find(item=>item.id===id);if(!sample)throw Error('Không tìm thấy mẫu.');const existing=(await list('inputs')).find(item=>item.sampleSource===sample.id&&item.projectId===projectId);if(existing)asset=existing;else{asset=await addAsset(new File([sample.blob],sample.name+'.png',{type:'image/png'}),{projectId});asset.license=sample.license;asset.sampleSource=sample.id;await write('inputs',asset);}}
       if (!asset || asset.kind !== 'image') throw Error('Một ảnh đã bị xóa khỏi Kho. Hãy chọn lại.');
       items.push(asset);
     }
@@ -64,7 +68,7 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
   async function load() {
     try {
       const value = category;
-      const items = await list(value);
+      const items = value==='samples'?await loadCharacterSamples():await list(value);
       if (!dialog.isConnected || value !== category) return;
       assets = items.filter(asset => asset.kind === 'image');
       render();
@@ -81,6 +85,7 @@ export async function openCharacterLibrary({ projectId, signal, canReference, on
     finally { uploadButton.disabled = false; }
   };
   function render() {
+    credit.hidden=category!=='samples';
     gallery.className = 'character-gallery character-view-' + mode;
     gallery.replaceChildren();
     for (const control of tabButtons) control.setAttribute('aria-pressed', String(control.dataset.category === category));
@@ -156,8 +161,8 @@ export async function openProjectAssetLibrary({ projectId, signal, onAdd, initia
       else preview.append(icon('music'));
       card.append(preview, el('span', asset.name)); gallery.append(card);
     }
-    add.disabled = !selected || selected.kind === 'audio';
-    add.title = selected?.kind === 'audio' ? 'Canvas chưa hỗ trợ node âm thanh.' : 'Thêm tài sản vào Canvas';
+    add.disabled = !selected;
+    add.title = 'Thêm tài sản vào Canvas';
     download.disabled = !selected;
   }
   try {

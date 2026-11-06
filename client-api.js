@@ -1,3 +1,4 @@
+import {diagnosticEvent} from './core/diagnostics.js';
 import { getAssistantTab, cacheAssistantTab, assertWorkflowTabAvailable } from "./core/assistant-tab.js";
 function removeReservedWorkflowOptions() {
   const assistant = getAssistantTab();
@@ -12,11 +13,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("mooz-assistant-tab-change", removeReservedWorkflowOptions);
   window.addEventListener("storage", removeReservedWorkflowOptions);
 }
+export function isAPIProvider(id){return ["google","openai","fal"].includes(id)||typeof id==="string"&&/^api_[a-f0-9]{32}$/.test(id);}
 export async function api(path, body) {
-  if (path === "jobs" && body && !["google", "openai"].includes(body.provider))
+  if (path === "jobs" && body && !isAPIProvider(body.provider))
     assertWorkflowTabAvailable(body.tabId);
   const key = globalThis.moozDesktop?.accessCode || sessionStorage.getItem("mooz-server-access") || "";
-  let response;
+  let response;const requestStart=performance.now();
   try {
     response = await fetch("/api/" + path, {
       method: body === undefined ? "GET" : "POST",
@@ -28,14 +30,17 @@ export async function api(path, body) {
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
+    diagnosticEvent({type:"api",path,ok:false,durationMs:performance.now()-requestStart});
     throw Error(
       "Mất kết nối máy chủ. Kiểm tra lượt đã gửi trước khi chạy lại.",
     );
   }
+  diagnosticEvent({type:"api",path,status:response.status,ok:response.ok,durationMs:performance.now()-requestStart});
   // A static SPA fallback returns HTML for /api/*, never a successful API result.
   if (!response.headers.get("content-type")?.includes("application/json"))
     throw Error("Bản web tĩnh chưa có máy chủ kết nối AI.");
   const data = await response.json();
+  if(body!==undefined&&path.startsWith("providers/")&&!path.endsWith("/test")&&path!=="providers/test")connectedAICache.clear();
   if (!response.ok)
     throw Error(data.error || "Máy chủ trả HTTP " + response.status);
   if ((path === "status" || path === "assistant/config") && Object.hasOwn(data, "assistantTab")) cacheAssistantTab(data.assistantTab);
@@ -52,7 +57,8 @@ export const providerList = [
   { id: "grok", name: "Grok · Chrome", types: ["text", "image", "video"] },
   { id: "flow", name: "Google Flow · Chrome", types: ["image", "video"] },
   { id: "openai", name: "OpenAI · API", types: ["text", "image"] },
-  { id: "google", name: "Gemini · API", types: ["text", "image"] },
+  { id: "google", name: "Gemini / Veo · API", types: ["text", "image", "video"] },
+  { id: "fal", name: "fal · API", types: ["image", "video"] },
 ];
 const connectedAICache = new Map();
 export function connectedAI(kind, { force = false } = {}) {
@@ -64,11 +70,12 @@ export function connectedAI(kind, { force = false } = {}) {
 }
 async function loadConnectedAI(kind) {
   const status = await api("status"), available = [];
+  for(let i=providerList.length-1;i>=0;i--)if(providerList[i].id.startsWith("api_"))providerList.splice(i,1);for(const p of status.providers||[])if(p.custom&&/^api_[a-f0-9]{32}$/.test(p.id))providerList.push({id:p.id,name:p.name,types:["text"],custom:true,vision:p.vision===true});
   const candidates = providerList.filter(provider => provider.types.includes(kind));
-  const chrome = status.chrome?.connected ? candidates.filter(provider => !["openai", "google"].includes(provider.id)) : [];
+  const chrome = status.chrome?.connected ? candidates.filter(provider => !isAPIProvider(provider.id)) : [];
   const tabs = await Promise.allSettled(chrome.map(async provider => ({ ...provider, tabs: await api("tabs?provider=" + provider.id) })));
   for (const result of tabs) if (result.status === "fulfilled" && result.value.tabs.length) available.push(result.value);
-  for (const provider of candidates.filter(provider => ["openai", "google"].includes(provider.id)))
+  for (const provider of candidates.filter(provider => isAPIProvider(provider.id)))
     if (status.providers?.some(item => item.id === provider.id && item.ready && item.types?.includes(kind))) available.push({ ...provider, tabs: [] });
   return available;
 }

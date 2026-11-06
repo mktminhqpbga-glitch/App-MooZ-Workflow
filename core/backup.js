@@ -1,5 +1,6 @@
+import {cleanLicense} from './license.js';
 import { createProject, exportProject } from "./projects.js";
-import { readAsset, toDataURL, addAsset, remove, list } from "./storage.js";
+import { readAsset, toDataURL, addAsset, remove, list, write, read } from "./storage.js";
 import { validateGraph } from "./graph.js";
 import { outputKey, isStale } from "./output-state.js";
 import { nodeAssetIds, remapPromptAssets } from "./references.js";
@@ -24,10 +25,12 @@ export async function exportBundle(project) {
       id: a.id,
       name: a.name,
       source: a.source,
+      license:cleanLicense(a.license),sampleSource:a.sampleSource||null,
       dataURL: await toDataURL(a.blob),
     });
   }
-  return JSON.stringify({ ...clean, format: "mooz-cvn-bundle", assets });
+  const sourceDocument=project.importId?await read("imports",project.importId):null;
+  return JSON.stringify({ ...clean, format: "mooz-cvn-bundle", assets,...(sourceDocument?{sourceDocument:{source:sourceDocument.source,fileName:sourceDocument.fileName,document:sourceDocument.document}}:{}) });
 }
 export async function importBundle(text) {
   if (typeof text !== "string" || text.length > 150 * 1024 * 1024)
@@ -67,6 +70,7 @@ export async function importBundle(text) {
         source: a.source === "upload" ? "upload" : "imported-result",
       });
       created.push(n);
+      if(a.license){n.license=cleanLicense(a.license);if(typeof a.sampleSource==='string'&&a.sampleSource.length<100)n.sampleSource=a.sampleSource;await write(n.source==='upload'?'inputs':'results',n);}
       map.set(a.id, n.id);
     }
     for (const n of graph.nodes)
@@ -88,6 +92,7 @@ export async function importBundle(text) {
         node.data.referenceOrder = JSON.stringify(JSON.parse(node.data.referenceOrder).filter(id => map.has(id)).map(id => map.get(id)));
     }
     for (const node of graph.nodes) if(freshOutputs.has(node.id))node.data.outputKey=outputKey(graph,node.id);
+    if(data.sourceDocument){if(typeof data.sourceDocument.document!=="object"||JSON.stringify(data.sourceDocument.document).length>5*1024*1024)throw Error("Nguồn workflow ngoài tối đa 5 MB.");const id=crypto.randomUUID();await write("imports",{id,projectId:project.id,source:String(data.sourceDocument.source||"JSON ngoài").slice(0,150),fileName:String(data.sourceDocument.fileName||"source.json").slice(0,200),document:data.sourceDocument.document});project.importId=id;}
     project.graph = graph;
     return { project, created };
   } catch (e) {

@@ -1,0 +1,4 @@
+const events=[];
+export function diagnosticEvent(value){const event={time:new Date().toISOString(),type:value.type,status:Number(value.status)||0,ok:value.ok===true,durationMs:Math.max(0,Math.round(Number(value.durationMs)||0))};if(typeof value.path==='string')event.path=value.path.split('?')[0].replace(/\/[a-f0-9-]{36}/gi,'/:id').slice(0,120);events.push(event);if(events.length>100)events.shift();}
+export function clientDiagnostics(){return{userAgent:navigator.userAgent,online:navigator.onLine,visibility:document.visibilityState,events:structuredClone(events)};}
+if(typeof window!=='undefined'){window.addEventListener('offline',()=>diagnosticEvent({type:'offline'}));window.addEventListener('online',()=>diagnosticEvent({type:'online',ok:true}));window.addEventListener('error',()=>diagnosticEvent({type:'renderer-error'}));window.addEventListener('unhandledrejection',()=>diagnosticEvent({type:'unhandled-rejection'}));}

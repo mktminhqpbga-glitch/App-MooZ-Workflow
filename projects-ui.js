@@ -1,3 +1,4 @@
+import {openWorkflowImport} from './workflow-exchange-ui.js';
 import { exportBundle, importBundle } from "./core/backup.js";
 import { remove } from "./core/storage.js";
 import {
@@ -101,7 +102,7 @@ export function mountProjects(host) {
             const result = await importBundle(text);
             project = result.project;
             created = result.created;
-          } else project = importProject(text);
+          } else if(format==="mooz-cvn-project")project = importProject(text);else{await openWorkflowImport({initialDocument:JSON.parse(text),fileName:chosen.name});return;}
           try {
             await repository.save(project, { create: true });
           } catch (e) {

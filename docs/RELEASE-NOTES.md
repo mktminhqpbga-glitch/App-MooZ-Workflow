@@ -1,3 +1,15 @@
+# 0.5.0 · Thiết lập luồng, API media và Phòng dựng
+
+- Thiết lập luồng với prompt từng bước: đọc ảnh sản phẩm → kịch bản → video từng cảnh → ghép → lưu Kho → hậu kỳ. Lưu, sửa, nhân bản và áp dụng cho đầu vào mới.
+- Cài đặt khóa/model OpenAI, Gemini/Veo và fal; thêm API tương thích OpenAI cho văn bản/vision. Khóa ở file riêng quyền 0600, chưa dùng Keychain.
+- Adapter Veo hai frame, fal Motion Control và năm công cụ ảnh chuyên dụng; lưu request ID và đối chiếu kết quả, không tự gửi lại tác vụ chưa rõ trạng thái.
+- Ràng buộc thông số theo provider; audio vào Canvas, lưu lựa chọn AI/tab và kiểm URL tab khi kết nối lại.
+- Xuất/nhập MooZ kèm media, giấy phép và nguồn; nhập graph JSON ngoài qua màn ánh xạ. LibTV chưa xác minh khi chưa có file xuất thật.
+- Phòng dựng: nhiều track, fade, giảm nhạc theo mức tiếng gốc, thumbnail, mốc, zoom timeline, preset và bản nháp.
+- Chẩn đoán loại khóa/prompt, kiểm phiên bản, dung lượng/quota mềm, dọn cache theo dự án; sáu ảnh nhân vật minh họa có giấy phép CC BY 4.0.
+
+Các kiểm thử dịch vụ dùng fixture/protocol, chưa thay cho kiểm tra tài khoản AI trả phí hoặc Chrome trên máy ảo thật. Chi tiết giới hạn và chứng cứ trong docs/APP-AUDIT-0.5.0.md.
+
 # 0.4.1 · Làm mới giao diện Phòng dựng
 
 - Khung xem, timeline và thông số chia thành các thẻ gọn; nhóm màu/âm thanh riêng.

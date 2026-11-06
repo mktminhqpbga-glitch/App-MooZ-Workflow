@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 export class ServerJobs {
@@ -7,6 +7,7 @@ export class ServerJobs {
     this.execute = execute;
     this.resources = new Map();
     this.active = new Map();
+    this.reconciles = new Map();
   }
   path(id) {
     if (typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id))
@@ -26,6 +27,7 @@ export class ServerJobs {
     const p = this.path(record.id);
     await writeFile(p + ".tmp", JSON.stringify(record), { mode: 0o600 });
     await rename(p + ".tmp", p);
+    const metadata={id:record.id,status:record.status,provider:record.provider,mediaType:record.mediaType,operation:record.operation,createdAt:record.createdAt,updatedAt:record.updatedAt,hasError:!!record.error,hasRemote:!!record.remote};await writeFile(p+'.meta.tmp',JSON.stringify(metadata),{mode:0o600});await rename(p+'.meta.tmp',p+'.meta.json');
   }
   async run(input) {
     const id = input.requestId;
@@ -57,6 +59,7 @@ export class ServerJobs {
     const record = {
       id: input.requestId,
       digest,
+      provider:input.provider,mediaType:input.mediaType,operation:input.operation,
       status: "queued",
       createdAt: new Date().toISOString(),
     };
@@ -71,7 +74,8 @@ export class ServerJobs {
     this.resources.set(resource, tail);
     await previous.catch(() => {});
     try {
-      const result = await this.execute(input, async () => {
+      const result = await this.execute(input, async patch => {
+        if(patch?.remote)record.remote=patch.remote;
         record.status = "sent";
         await this.put(record);
       });
@@ -94,4 +98,8 @@ export class ServerJobs {
     }
     return record;
   }
+  async reconcile(id,execute){if(this.active.has(id))return this.get(id);if(this.reconciles.has(id))return this.reconciles.get(id);const run=(async()=>{const record=await this.get(id);if(!record?.remote||record.status==='success'||record.status==='error')return record;const result=await execute(record.remote);if(!result.pending){record.result=result;record.status='success';delete record.error;record.updatedAt=new Date().toISOString();await this.put(record);}return record;})();this.reconciles.set(id,run);try{return await run;}finally{this.reconciles.delete(id);}}
+
+  async diagnostics(){try{const files=(await readdir(this.directory)).filter(f=>f.endsWith('.meta.json')).slice(-200);const rows=await Promise.all(files.map(async f=>{try{return JSON.parse(await readFile(join(this.directory,f),'utf8'));}catch{return null;}}));return rows.filter(Boolean).sort((a,b)=>(b.updatedAt||b.createdAt||'').localeCompare(a.updatedAt||a.createdAt||'')).slice(0,100);}catch(error){if(error.code==='ENOENT')return[];throw error;}}
+
 }

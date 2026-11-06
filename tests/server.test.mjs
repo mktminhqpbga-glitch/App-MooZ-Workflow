@@ -197,6 +197,6 @@ test("existing MooZ Connect local protocol pairs, lists and validates tab before
 });
 
 test('OpenAI image references use multipart edit endpoint and preserve file bytes', async()=>{
- const response=await generateAPI({provider:'openai',mediaType:'image',prompt:'Giữ nhân vật',referenceImages:['data:image/png;base64,AQID'],size:'9:16'}, {env:{MOOZ_OPENAI_KEY:'fixture'},fetchImpl:async(url,options)=>{assert.equal(url,'https://api.openai.com/v1/images/edits');assert.ok(options.body instanceof FormData);assert.equal(options.headers['Content-Type'],undefined);assert.deepEqual(new Uint8Array(await options.body.get('image[]').arrayBuffer()),new Uint8Array([1,2,3]));return Response.json({data:[{b64_json:'AQID'}]});}});
+ const response=await generateAPI({provider:'openai',mediaType:'image',prompt:'Giữ nhân vật',referenceImages:['data:image/png;base64,AQID'],size:'2:3'}, {env:{MOOZ_OPENAI_KEY:'fixture'},fetchImpl:async(url,options)=>{assert.equal(url,'https://api.openai.com/v1/images/edits');assert.ok(options.body instanceof FormData);assert.equal(options.body.get('size'),'1024x1536');assert.equal(options.headers['Content-Type'],undefined);assert.deepEqual(new Uint8Array(await options.body.get('image[]').arrayBuffer()),new Uint8Array([1,2,3]));return Response.json({data:[{b64_json:'AQID'}]});}});
  assert.equal(response.kind,'image');
 });

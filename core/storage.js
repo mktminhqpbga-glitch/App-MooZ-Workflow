@@ -2,7 +2,7 @@ const DB = "mooz-cvn-content";
 let pending;
 export function contentDB() {
   return (pending ||= new Promise((resolve, reject) => {
-    const r = indexedDB.open(DB, 3);
+    const r = indexedDB.open(DB, 5);
     r.onupgradeneeded = () => {
       for (const name of [
         "inputs",
@@ -11,6 +11,8 @@ export function contentDB() {
         "jobs",
         "templates",
         "characters",
+        "imports",
+        "drafts",
       ])
         if (!r.result.objectStoreNames.contains(name))
           r.result.createObjectStore(name, { keyPath: "id" });
@@ -101,6 +103,7 @@ export async function addAsset(
     throw Error(
       "Chọn ảnh PNG/JPG/WebP/GIF, video MP4/WebM/MOV hoặc âm thanh, tối đa 100 MB.",
     );
+  const softLimit=Number(localStorage.getItem('mooz-storage-limit-mb')||0)*1048576;if(softLimit>0&&navigator.storage?.estimate){const estimate=await navigator.storage.estimate();if((estimate.usage||0)+file.size>softLimit)throw Error('Hồ sơ vượt ngưỡng dung lượng đã đặt. Xuất sao lưu/dọn cache hoặc điều chỉnh ngưỡng trong Cài đặt.');}
   await verifyMedia(file);
   const asset = {
     id: crypto.randomUUID(),

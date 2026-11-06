@@ -67,15 +67,16 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
         { id: 'src-a', type: 'imageInput', x: 0, y: 0, data: { customName: 'Ảnh đỏ', assetId: a.id } },
         { id: 'src-b', type: 'imageInput', x: 0, y: 400, data: { customName: 'Ảnh xanh', assetId: b.id } },
         { id: 'src-v', type: 'videoInput', x: 0, y: 750, data: { customName: 'Video mẫu', assetId: v.id } },
-        { id: 'image-target', type: 'generateImage', x: 640, y: 100, data: { customName: 'Tạo ảnh', size: '16:9', provider: 'openai' } },
+        { id: 'image-target', type: 'generateImage', x: 640, y: 100, data: { customName: 'Tạo ảnh', size: '2:3', provider: 'openai' } },
         { id: 'video-target', type: 'generateVideo', x: 1280, y: 100, data: { customName: 'Tạo video', size: '16:9', provider: 'muse' } },
-        { id: 'empty-target', type: 'generateImage', x: 1900, y: 100, data: { customName: 'Node trống', size: '16:9', provider: 'openai' } },
+        { id: 'empty-target', type: 'generateImage', x: 1900, y: 100, data: { customName: 'Node trống', size: '2:3', provider: 'openai' } },
       ];
       project.graph.viewport = { x: 100, y: 100, zoom: .65 };
       await new ProjectRepository().save(project, { create: true });
       return { id: project.id, image: canvas.toDataURL().split(',')[1] };
     }, video);
     await page.goto(url + '/#canvas/' + fixture.id);
+    await page.locator('[data-id="image-target"] .cvn-node-title').waitFor();
     const openingMetadata = await page.evaluate(async id => {
       const { ProjectRepository } = await import('./core/projects.js');
       const repo = new ProjectRepository(), before = await repo.get(id);
@@ -409,7 +410,8 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     await lane1.locator('[data-asset-id="' + inputId + '"]').click();
     await lane1.getByLabel('Thông số hàng loạt', { exact: true }).click();
     assert.equal(await lane1.locator('.generation-options-panel .ratio-grid > button').count(), 13);
-    await lane1.getByRole('button', { name: 'Khung 9:16', exact: true }).click();
+    assert.equal(await lane1.getByRole('button', { name: 'Khung 9:16', exact: true }).isDisabled(),true,'unsupported OpenAI ratio cannot be selected');
+    await lane1.getByRole('button', { name: 'Khung 2:3', exact: true }).click();
     await lane1.getByLabel('Đóng thông số hàng loạt', { exact: true }).click();
     await lane1.getByLabel('Prompt hàng loạt', { exact: true }).fill('Một A\nMột B');
     await lane1.getByRole('button', { name: 'Thêm & tạo node', exact: true }).click();
@@ -418,7 +420,7 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
     await page.getByRole('button', { name: 'Chạy hàng đợi', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.batch-queue .job-state.success').length === 2, null, { timeout: 12000 }).catch(async error => { console.log('QUEUE DEBUG', await page.locator('.batch-queue').innerText(), await page.evaluate(async()=>{const {list}=await import('./core/storage.js');return(await list('jobs')).map(j=>({id:j.id,status:j.status,error:j.error,kind:j.kind}));}), errors); throw error; });
     assert.equal(batchRequests.length, 2);
-    assert.ok(batchRequests.every(request => request.provider === 'openai' && request.size === '9:16' && request.referenceImages.length === 1));
+    assert.ok(batchRequests.every(request => request.provider === 'openai' && request.size === '2:3' && request.referenceImages.length === 1));
     await page.getByRole('button', { name: 'Tạm dừng cấp việc', exact: true }).click();
     await lane1.getByLabel('Chọn ảnh nhân vật tham chiếu', { exact: true }).click();
     await lane1.locator('.batch-character-picker .batch-image-choices button').first().click();

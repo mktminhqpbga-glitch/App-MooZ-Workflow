@@ -1,7 +1,13 @@
+import {assertGenerationSettings} from '../core/provider-capabilities.js';
+import {falTools,remotePlan,generateRemoteMedia} from './remote-media.mjs';
 export function validateAPIInput(input, env = process.env) {
+  if(input.operation && (input.provider!=='fal'||!Object.hasOwn(falTools,input.operation)))throw Error('Chưa có adapter chuyên dụng cho công cụ và nhà cung cấp này.');
   const provider = apiProviders[input.provider];
   if (!provider || !env[provider.key]) throw Error('Chưa cấu hình khóa API trên máy chủ.');
+  if(input.provider==='fal'||input.provider==='google'&&input.mediaType==='video'){assertGenerationSettings(input);remotePlan(input,env);return;}
   if (!provider.types.includes(input.mediaType)) throw Error('API này chưa hỗ trợ đầu ra đã chọn. Dùng tab AI cho video.');
+  if(input.provider==="openai"&&input.mediaType==="image"&&!/^gpt-image-/.test(env.MOOZ_OPENAI_IMAGE_MODEL||"gpt-image-1"))throw Error("Adapter OpenAI ảnh này cần model gpt-image, chưa dùng cấu hình DALL-E với thông số này.");
+  assertGenerationSettings(input);
   const refs = input.referenceImages || [];
   if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 50000 || !Array.isArray(refs) || refs.length > 8 || refs.some(ref => typeof ref !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(ref))) throw Error('Prompt hoặc ảnh tham chiếu không hợp lệ.');
   const sizes = refs.map(ref => Buffer.byteLength(ref.slice(ref.indexOf(',')+1),'base64'));
@@ -14,17 +20,19 @@ export const apiProviders = {
     types: ["text", "image"],
     key: "MOOZ_OPENAI_KEY",
   },
+  fal: { name:"fal API",types:["image","video"],key:"MOOZ_FAL_KEY" },
   google: {
-    name: "Google Gemini API",
-    types: ["text", "image"],
+    name: "Google Gemini / Veo API",
+    types: ["text", "image", "video"],
     key: "MOOZ_GOOGLE_KEY",
   },
 };
 export async function generateAPI(
   input,
-  { env = process.env, fetchImpl = fetch, signal } = {},
+  { env = process.env, fetchImpl = fetch, signal, checkpoint } = {},
 ) {
   validateAPIInput(input, env);
+  if(input.provider==='fal'||input.provider==='google'&&input.mediaType==='video')return generateRemoteMedia(input,{env,fetchImpl,signal,checkpoint});
   const p = apiProviders[input.provider], key = env[p.key], prompt = input.prompt, refs = input.referenceImages || [];
   const request = async (url, body, headers) => {
     const res = await fetchImpl(url, {
@@ -45,10 +53,10 @@ export async function generateAPI(
   };
   if (input.provider === "openai") {
     if (input.mediaType === "image") {
-      const size = input.size === '9:16' ? '1024x1536' : input.size === '16:9' ? '1536x1024' : '1024x1024';
+      const size = input.size === '2:3' ? '1024x1536' : input.size === '3:2' ? '1536x1024' : '1024x1024';
       if (refs.length) {
         const form = new FormData();
-        form.append('model',env.MOOZ_OPENAI_IMAGE_MODEL || 'gpt-image-1'); form.append('prompt',prompt); form.append('size',size); form.append('n','1'); form.append('quality',['low','medium','high'].includes(input.quality)?input.quality:'medium');
+        form.append('model',env.MOOZ_OPENAI_IMAGE_MODEL || 'gpt-image-1'); form.append('prompt',prompt); form.append('size',size); form.append('n','1');form.append('background',input.background||'auto'); form.append('quality',['low','medium','high'].includes(input.quality)?input.quality:'medium');
         for (const [index,ref] of refs.entries()) { const mime=ref.slice(5,ref.indexOf(';')),bytes=Buffer.from(ref.slice(ref.indexOf(',')+1),'base64');form.append('image[]',new Blob([bytes],{type:mime}),'reference-'+index+'.'+(mime==='image/jpeg'?'jpg':mime.split('/')[1])); }
         const r = await request('https://api.openai.com/v1/images/edits',form,{Authorization:'Bearer '+key});
         if (!r.data?.[0]?.b64_json) throw Error('API chưa trả dữ liệu ảnh.');
@@ -60,15 +68,11 @@ export async function generateAPI(
           model: env.MOOZ_OPENAI_IMAGE_MODEL || "gpt-image-1",
           prompt,
           n: 1,
+          background:input.background||"auto",
           quality: ["low", "medium", "high"].includes(input.quality)
             ? input.quality
             : "medium",
-          size:
-            input.size === "9:16"
-              ? "1024x1536"
-              : input.size === "16:9"
-                ? "1536x1024"
-                : "1024x1024",
+          size,
         },
         { Authorization: "Bearer " + key },
       );
@@ -124,7 +128,7 @@ export async function generateAPI(
     {
       contents: [{ role: "user", parts }],
       ...(input.mediaType === "image"
-        ? { generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }
+        ? { generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig:{aspectRatio:input.size||"1:1"} } }
         : {}),
     },
     { "x-goog-api-key": key },

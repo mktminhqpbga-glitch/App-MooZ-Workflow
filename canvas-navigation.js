@@ -59,7 +59,7 @@ export function createCanvasNavigation({ shell, hud, zoomNode, projectId, getNam
   categorySelect.setAttribute('aria-label', 'Loại tài sản');
   categorySelect.onchange = () => { category = categorySelect.value; void renderContent(); };
   const upload = el('input');
-  upload.type = 'file'; upload.multiple = true; upload.accept = 'image/*,video/*'; upload.hidden = true;
+  upload.type = 'file'; upload.multiple = true; upload.accept = 'image/*,video/*,audio/*'; upload.hidden = true;
   upload.onchange = async () => {
     try {
       for (const file of upload.files) await addAsset(file, { projectId });
@@ -126,12 +126,11 @@ export function createCanvasNavigation({ shell, hud, zoomNode, projectId, getNam
           else if (category === 'templates') await onUseTemplate(item);
           else await onUseAsset(item);
         }, 'canvas-asset-row');
-        if (activeTab === 'assets' && item.kind === 'audio') { row.disabled = true; row.title = 'Canvas chưa hỗ trợ node âm thanh.'; }
         if (item.kind === 'image' && item.blob) {
           let url = urls.get(item.id);
           if (!url) { url = URL.createObjectURL(item.blob); urls.set(item.id, url); }
           const image = el('img'); image.src = url; image.alt = ''; row.append(image);
-        } else row.append(icon(item.kind === 'video' ? 'video' : activeTab === 'canvas' ? 'layout' : category === 'templates' ? 'connections' : 'text'));
+        } else row.append(icon(item.kind === 'audio' ? 'music' : item.kind === 'video' ? 'video' : activeTab === 'canvas' ? 'layout' : category === 'templates' ? 'connections' : 'text'));
         const label = el('span', undefined, 'canvas-asset-row-label');
         label.append(el('strong', item.name || item.data?.customName || item.type), el('small', activeTab === 'canvas' ? item.type : item.kind || (category === 'prompts' ? 'Prompt' : 'Luồng')));
         row.append(label); body.append(row);

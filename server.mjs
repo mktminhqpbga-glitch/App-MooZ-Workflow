@@ -1,3 +1,7 @@
+import {CustomProviders} from './server/custom-providers.mjs';
+import {diagnosticSnapshot} from './server/diagnostics.mjs';
+import {reconcileMedia,falTools} from './server/remote-media.mjs';
+import {APISettings} from './server/api-settings.mjs';
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname } from "node:path";
@@ -16,6 +20,7 @@ if (
   !process.env.MOOZ_ACCESS_TOKEN
 )
   throw Error("Đặt MOOZ_ACCESS_TOKEN trước khi mở máy chủ ra mạng.");
+const providerSettings=new APISettings(runtime);await providerSettings.init();const customProviders=new CustomProviders(runtime);await customProviders.init();
 const chrome = new ChromeConnection(runtime);
 await chrome.init();
 const assistantTab = new AssistantTab(runtime);
@@ -30,7 +35,7 @@ const chromeConfiguration = async action => {
 const jobs = new ServerJobs(
   resolve(runtime, "requests"),
   async (input, sent) => {
-    if (["voiceover", "transcribe"].includes(input.operation)) { validateSpeech(input); await sent(); return speechAPI(input); }
+    if (["voiceover", "transcribe"].includes(input.operation)) { const env=providerSettings.env();validateSpeech(input,env); await sent(); return speechAPI(input,{env}); }
     if (
       !["text", "image", "video"].includes(input.mediaType) ||
       typeof input.prompt !== "string" ||
@@ -51,15 +56,16 @@ const jobs = new ServerJobs(
       throw Error("Ảnh tham chiếu không hợp lệ.");
     const referenceSizes=(input.referenceImages||[]).map(value=>Buffer.byteLength(value.slice(value.indexOf(',')+1),'base64'));
     if(referenceSizes.some(size=>size>8*1024*1024)||referenceSizes.reduce((sum,size)=>sum+size,0)>32*1024*1024)throw Error('Ảnh tham chiếu vượt giới hạn 8 MB/ảnh hoặc tổng 32 MB.');
+    if(customProviders.get(input.provider)){customProviders.checkInput(input);await sent();return customProviders.generate(input);}
     if (apiProviders[input.provider]) {
       if (
-        !process.env[apiProviders[input.provider].key] ||
+        !providerSettings.env()[apiProviders[input.provider].key] ||
         !apiProviders[input.provider].types.includes(input.mediaType)
       )
         throw Error("Chưa cấu hình API phù hợp.");
-      validateAPIInput(input);
+      const env=providerSettings.env();validateAPIInput(input,env);
       await sent();
-      return generateAPI(input);
+      return generateAPI(input,{env,checkpoint:sent});
     }
     if (
       !["muse", "gemini", "chatgpt", "grok", "flow"].includes(input.provider) ||
@@ -86,22 +92,33 @@ const staticFiles = new Set([
   "canvas-libraries.js",
   "assistant-ui.js",
   "modules.js",
+  "flow-workbench.js",
+  "workflow-exchange-ui.js",
+  "core/workflow-exchange.js",
   "jobs-ui.js",
   "core/graph.js",
+  "core/tab-binding.js",
   "core/projects.js",
   "core/storage.js",
   "core/runner.js",
   "core/backup.js",
+  "core/license.js",
   "core/capabilities.js",
+  "core/provider-capabilities.js",
   "core/references.js",
   "core/assistant-tab.js",
   "media-tools.js",
   "image-workbench.js",
+  "advanced-image-workbench.js",
   "icons.js",
   "post-workbench.js",
   "finishing-workbench.js",
   "core/finishing-plan.js",
   "relay-settings-ui.js",
+  "api-settings-ui.js",
+  "custom-providers-ui.js",
+  "maintenance-ui.js",
+  "core/diagnostics.js",
   "depth-worker.js",
   "depth-workbench.js",
   "core/depth-video.js",
@@ -113,9 +130,21 @@ const staticFiles = new Set([
   "core/queue-plan.js",
   "core/output-state.js",
   "core/flow-plan.js",
+  "core/workflow-recipe.js",
+  "core/character-samples.js",
+  "vendor/characters/catalog.json",
+  "vendor/characters/LICENSE.txt",
+  "vendor/characters/CC-BY-4.0.txt",
+  "vendor/characters/adventurer-1.png",
+  "vendor/characters/adventurer-2.png",
+  "vendor/characters/adventurer-3.png",
+  "vendor/characters/adventurer-4.png",
+  "vendor/characters/adventurer-5.png",
+  "vendor/characters/adventurer-6.png",
   "core/queue-storage.js",
   "core/queue-runner.js",
   "core/local-media.js",
+  "core/media-preview.js",
   "vendor/mooz/workflow-runtime.js",
   "vendor/mooz/media-studio.js",
   "vendor/mooz/ffmpeg/ffmpeg.js",
@@ -172,20 +201,27 @@ const server = createServer(async (req, res) => {
         });
       if (path === "/api/speech" && req.method === "POST") {
         const input = await body(req);
-        validateSpeech(input);
+        validateSpeech(input,providerSettings.env());
         return json(res, 200, await jobs.run({ requestId: input.requestId, provider: 'openai', operation: input.operation, text: input.text || '', data: input.data || '', settings: input.settings || {} }));
       }
+      if(path==='/api/providers/custom'&&req.method==='GET')return json(res,200,customProviders.snapshot());
+      if(path==='/api/providers/custom'&&req.method==='POST'){if(jobs.active.size)throw Error('Đợi job đang chạy kết thúc trước khi sửa AI.');const input=await body(req);return json(res,200,input.remove?await customProviders.remove(input.id):await customProviders.save(input));}
+      if(path==='/api/providers/custom/test'&&req.method==='POST')return json(res,200,await customProviders.test(await body(req)));
+      if(path==='/api/providers/config'&&req.method==='GET')return json(res,200,providerSettings.snapshot());
+      if(path==='/api/providers/config'&&req.method==='POST'){if(jobs.active.size)throw Error('Chờ tác vụ đang chạy kết thúc trước khi đổi khóa/model.');return json(res,200,await providerSettings.save(await body(req)));}
+      if(path==='/api/providers/test'&&req.method==='POST')return json(res,200,await providerSettings.test(await body(req)));
+      if(path==='/api/diagnostics'&&req.method==='GET'){const version=JSON.parse(await readFile(resolve(root,'package.json'),'utf8')).version,release=JSON.parse(await readFile(resolve(root,'downloads/release.json'),'utf8'));return json(res,200,diagnosticSnapshot({version,release,chrome,providers:{snapshot:()=>({providers:[...providerSettings.snapshot().providers,...customProviders.snapshot().providers.map(p=>({id:p.id,keyConfigured:p.keyConfigured,models:{text:p.model}}))]})},requests:await jobs.diagnostics(),host,port,active:jobs.active.size}));}
       if (path === "/api/status" && req.method === "GET")
         return json(res, 200, {
           chrome: chrome.status(),
           assistantTab: assistantTab.snapshot(),
-          providers: Object.entries(apiProviders).map(([id, p]) => ({
+          providers: [...Object.entries(apiProviders).map(([id, p]) => ({
             id,
             name: p.name,
             types: p.types,
-            ready: !!process.env[p.key],
-            operations: p.types.map((type) => type + ".generate"),
-          })),
+            ready: !!providerSettings.env()[p.key],
+            operations: [...p.types.map(type=>type+".generate"),...(id==="fal"?Object.keys(falTools):[])],
+          })),...customProviders.snapshot().providers.map(({id,name,types,ready,custom,vision})=>({id,name,types,ready,custom,vision}))],
         });
       if (path === "/api/tabs" && req.method === "GET")
         return json(
@@ -233,7 +269,8 @@ const server = createServer(async (req, res) => {
       if (path === "/api/jobs" && req.method === "POST")
         return json(res, 200, await jobs.run({ ...await body(req), purpose: "workflow" }));
       if (path.startsWith("/api/jobs/") && req.method === "GET") {
-        const record = await jobs.get(path.slice(10));
+        let record = await jobs.get(path.slice(10));
+        if(record?.remote&&!jobs.active.has(record.id)&&record.status!=="success")try{record=await jobs.reconcile(record.id,remote=>reconcileMedia(remote,{env:providerSettings.env()}));}catch(error){record={...record,error:error.message};}
         return json(
           res,
           record ? 200 : 404,

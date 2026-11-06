@@ -1,3 +1,5 @@
+import {assertWorkflowCapabilities} from './provider-capabilities.js';
+import {videoMetadata} from './depth-video.js';
 import { validateGraph, topologicalOrder } from "./graph.js";
 import { promptAssetIds } from "./references.js";
 import { assertWorkflowTabAvailable } from "./assistant-tab.js";
@@ -13,9 +15,9 @@ import {
   write,
   list,
 } from "./storage.js";
-import { api, providerList } from "../client-api.js";
+import { api, providerList, isAPIProvider } from "../client-api.js";
 const controllers = new Map();
-const localTypes = new Set(['captureLastFrame','assembleVideo','videoTrim','videoRotate','videoColor','frameFit','audioMix','subtitles','voiceSync','transition','speed','watermark','audioExtract','voiceover','transcribe']);
+const localTypes = new Set(['storeVideo','captureLastFrame','assembleVideo','videoTrim','videoRotate','videoColor','frameFit','audioMix','subtitles','voiceSync','transition','speed','watermark','audioExtract','voiceover','transcribe']);
 export async function createJob({
   projectId,
   graph,
@@ -30,9 +32,10 @@ export async function createJob({
   originalPrompt = '',
   seedAccepted = false,
 }) {
-  if (!["google", "openai", "local"].includes(provider) && !autoTab) assertWorkflowTabAvailable(tabId);
+  if (provider!=="local"&&!isAPIProvider(provider) && !autoTab) assertWorkflowTabAvailable(tabId);
   const snapshot = validateGraph(graph),
     generators = snapshot.nodes.filter((n) => n.type.startsWith("generate"));
+  if(snapshot.nodes.some(node=>node.type==="externalStep"||node.data.importWarning))throw Error("Workflow còn bước từ ứng dụng khác chưa ánh xạ. Hoàn tất ánh xạ trước khi chạy.");
   if (!generators.length && !snapshot.nodes.some(n => localTypes.has(n.type))) throw Error("Luồng chưa có bước xử lý.");
   const inputAssets = {}, acceptedOutputs = {};
   if (seedAccepted) for (const node of snapshot.nodes) {
@@ -44,8 +47,9 @@ export async function createJob({
     } else if (node.type === 'generateText' && node.data.text) acceptedOutputs[node.id] = { kind: 'text', text: node.data.text, ...(node.data.sceneCount ? { scenes: parseScenes(node.data.text,node.data.sceneCount), accepted: true } : {}) };
   }
   const pending = generators.filter(node => !acceptedOutputs[node.id]), p = providerList.find(item => item.id === provider);
+  assertWorkflowCapabilities(snapshot,provider,{nodes:pending,profile:p});
   if (pending.length && (!p || pending.some(node => !p.types.includes(node.type==='generateText'?'text':node.type==='generateImage'?'image':'video')))) throw Error('AI đã chọn không hỗ trợ mọi bước trong luồng.');
-  if (!['google','openai','local'].includes(provider) && !autoTab && (!Number.isSafeInteger(tabId) || typeof chatURL !== 'string')) throw Error('Chọn tab AI đang kết nối.');
+  if (provider!=='local'&&!isAPIProvider(provider) && !autoTab && (!Number.isSafeInteger(tabId) || typeof chatURL !== 'string')) throw Error('Chọn tab AI đang kết nối.');
   const required = new Set(snapshot.nodes.filter(node => ((node.type.startsWith('generate') || localTypes.has(node.type)) && !acceptedOutputs[node.id]) || node.type==='preview').map(node=>node.id));
   let changed=true;while(changed){changed=false;for(const edge of snapshot.edges)if(required.has(edge.target)&&!acceptedOutputs[edge.target]&&!required.has(edge.source)){required.add(edge.source);changed=true;}}
   for (const node of snapshot.nodes.filter(node => required.has(node.id))) {
@@ -56,7 +60,8 @@ export async function createJob({
     if (!node.type.startsWith('generate') || acceptedOutputs[node.id]) continue;
     const incoming=snapshot.edges.filter(edge=>edge.target===node.id&&edge.targetPort==='reference'), ids=new Set([...incoming.map(edge=>snapshot.nodes.find(source=>source.id===edge.source)?.data.assetId||edge.source),...promptAssetIds(node.data.studioPrompt)]);
     if(ids.size>8)throw Error('Mỗi lượt AI tối đa 8 ảnh tham chiếu.');
-    if(snapshot.edges.some(edge=>edge.target===node.id&&edge.targetPort==='video'))throw Error('Adapter hiện tại chưa nhận video gốc làm tham chiếu; chặn trước khi gửi.');
+    if(snapshot.edges.some(edge=>edge.target===node.id&&edge.targetPort==='video')&&(provider!=='fal'||node.type!=='generateVideo'))throw Error('Video nguồn hiện cần fal Motion Control; chặn trước khi gửi.');
+    if(provider==='fal'&&node.type==='generateVideo'){const edge=snapshot.edges.find(e=>e.target===node.id&&e.targetPort==='video'),source=edge&&snapshot.nodes.find(n=>n.id===edge.source),asset=source?.data.assetId&&inputAssets[source.data.assetId];if(asset){if(asset.blob.size>24*1024*1024)throw Error('Motion Control giới hạn video 24 MB.');const metadata=await videoMetadata(asset);if(metadata.duration<3||metadata.duration>30)throw Error('Motion Control cần video nguồn 3–30 giây.');}}
     for(const assetId of promptAssetIds(node.data.studioPrompt)){if(inputAssets[assetId])continue;const asset=await readAsset(assetId);if(!asset||asset.kind!=='image')throw Error('Thiếu ảnh tham chiếu trong prompt.');inputAssets[assetId]={kind:asset.kind,blob:asset.blob,name:asset.name};}
   }
   const job = {
@@ -152,7 +157,8 @@ async function execute(job, signal, onUpdate) {
         const values = sources.map(source => source.value).filter(Boolean),
           files = async kind => Promise.all(values.filter(value => value.kind === kind && value.assetId).map(async value => job.inputAssets?.[value.assetId] || await readAsset(value.assetId))),
           settings = n.data.localSettings ? JSON.parse(n.data.localSettings) : {};
-        if (n.type === 'captureLastFrame') {
+        if(n.type==='storeVideo'){const [source]=await files('video');if(!source)throw Error('Chưa có video để đưa vào Kho.');const saved=await addAsset(new File([source.blob],source.name||'Thanh-pham.mp4',{type:source.blob.type}),{projectId:job.projectId,source:'local'});saved.savedAt=new Date().toISOString();saved.savedProjectIds=[job.projectId];saved.derivedFrom=source.id;await write('results',saved);job.outputs[id]={kind:'video',assetId:saved.id,report:'Đã đưa thành phẩm vào Kho đã lưu.'};await update();
+        }else if (n.type === 'captureLastFrame') {
           const [source] = await files('video'); if (!source) throw Error('Thiếu video nguồn để lấy frame cuối.');
           const asset=await captureFrame({...source,projectId:job.projectId},Number.MAX_SAFE_INTEGER);signal.throwIfAborted();job.outputs[id]={kind:'image',assetId:asset.id};await update();
         } else if (['voiceover','transcribe'].includes(n.type)) {
@@ -227,6 +233,8 @@ async function execute(job, signal, onUpdate) {
         referenceBytes+=asset.blob.size;if(asset.blob.size>8*1024*1024||referenceBytes>32*1024*1024)throw Error('Ảnh tham chiếu vượt 8 MB/ảnh hoặc tổng 32 MB; giảm kích thước trước khi gửi.');
         refs.push(await toDataURL(asset.blob));
       }
+      const videoSources=sources.filter(source=>source.edge.targetPort==='video'&&source.value?.kind==='video');let motion={};
+      if(videoSources.length){if(job.provider!=='fal'||videoSources.length!==1)throw Error('Video tham chiếu hiện cần fal Motion Control và đúng một video.');if(refs.length!==1)throw Error('Motion Control cần đúng một ảnh nhân vật.');const asset=job.inputAssets?.[videoSources[0].value.assetId]||await readAsset(videoSources[0].value.assetId);if(!asset?.blob||asset.blob.size>24*1024*1024)throw Error('Video Motion Control tối đa 24 MB để gửi an toàn.');const metadata=await videoMetadata(asset,signal);motion={referenceVideo:await toDataURL(asset.blob),referenceVideoDuration:metadata.duration,videoMode:'motion'};}
       const requestId = job.requests[id] || crypto.randomUUID();
       job.requests[id] = requestId;
       job.activeNode = id;
@@ -241,6 +249,7 @@ async function execute(job, signal, onUpdate) {
         prompt,
         referenceImages: refs,
         size: n.data.size || "16:9",
+        resolution:n.data.resolution,background:n.data.background,videoMode:n.data.videoMode,negativePrompt:n.data.negativePrompt,...motion,
         quality: ["ultra", "max"].includes(n.data.quality) ? "high" : n.data.quality || "medium",
         ...(n.data.duration == null ? {} : { duration: n.data.duration }),
       });

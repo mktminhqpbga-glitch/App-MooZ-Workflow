@@ -1,3 +1,8 @@
+import {isAPIProvider} from './client-api.js';
+import {openWorkflowImport,downloadWorkflow} from './workflow-exchange-ui.js';
+import {openAdvancedImageWorkbench} from './advanced-image-workbench.js';
+import {generationCapabilities} from './core/provider-capabilities.js';
+import {parseTabBinding} from './core/tab-binding.js';
 import { openDepthWorkbench } from "./depth-workbench.js";
 import { mergeJobOutputs, isStale } from "./core/output-state.js";
 import { openPostWorkbench } from "./post-workbench.js";
@@ -25,7 +30,7 @@ import {
 import { createJob, startJob, stopJob, inspectJob, resumeJob } from "./core/runner.js";
 import { api, providerList, connectedAI, el, button, notice } from "./client-api.js";
 const repo = new ProjectRepository();
-const localNodeNames = { captureLastFrame:'Lấy frame cuối', assembleVideo:'Ghép / xuất MP4',videoTrim:'Cắt video',videoRotate:'Xoay / lật',videoColor:'Chỉnh màu',frameFit:'Vừa khung',audioExtract:'Tách MP3',audioMix:'Trộn nhạc',subtitles:'Phụ đề SRT',voiceSync:'Đồng bộ lời đọc',transition:'Chuyển cảnh',speed:'Tốc độ',watermark:'Logo',voiceover:'Lồng tiếng AI',transcribe:'Nhận diện SRT AI' };
+const localNodeNames = { storeVideo:'Đưa video vào Kho', captureLastFrame:'Lấy frame cuối', assembleVideo:'Ghép / xuất MP4',videoTrim:'Cắt video',videoRotate:'Xoay / lật',videoColor:'Chỉnh màu',frameFit:'Vừa khung',audioExtract:'Tách MP3',audioMix:'Trộn nhạc',subtitles:'Phụ đề SRT',voiceSync:'Đồng bộ lời đọc',transition:'Chuyển cảnh',speed:'Tốc độ',watermark:'Logo',voiceover:'Lồng tiếng AI',transcribe:'Nhận diện SRT AI' };
 
 export async function mountStudio(host, id) {
   if (!id) {
@@ -211,7 +216,7 @@ export async function mountStudio(host, id) {
     wheelSave = null,
     inlineSave = null;
   const referencePickerOpen = new Set(), renderedNodes = new Map(), nodeRenderKeys = new Map(), newAssetCenters = new Map();
-  const bindings = new Map(),
+  const bindings = new Map(project.graph.nodes.filter(node=>node.data.tabBinding).map(node=>[node.id,parseTabBinding(node.data.tabBinding)])),
     tabLabelRefreshers = new Map(),
     activeJobs = new Map(),
     batches = new Map();
@@ -274,7 +279,7 @@ export async function mountStudio(host, id) {
       link = el("a");
     link.href = url;
     link.download = "MooZ-CVN-backup-" + project.id + ".json";
-    link.click();
+    link.click();localStorage.setItem("mooz-last-export",String(Date.now()));
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   const projectMenu = el("details", undefined, "cvn-project-menu"),
@@ -282,6 +287,8 @@ export async function mountStudio(host, id) {
     projectOptions = el("div");
   projectToggle.setAttribute("aria-label", "Menu dự án");
   projectOptions.append(
+    button("Xuất workflow kèm media",()=>downloadWorkflow({...project,name:name.value,graph:controller.snapshot()})),
+    button("Nhập workflow",()=>openWorkflowImport({signal:abort.signal})),
     button("Chạy toàn bộ luồng", () => showRunGraph()),
     button("Lượt chạy & tiếp tục", () => showProjectRuns()),
     button("Lưu luồng vào Kho", async () => {
@@ -295,6 +302,7 @@ export async function mountStudio(host, id) {
       notice("Đã lưu vào Kho Luồng mẫu");
     }),
   );
+  if(project.importId)projectOptions.append(button('Xem nguồn / ánh xạ workflow nhập',async()=>{const source=await read('imports',project.importId);if(!source)throw Error('Không còn tệp nguồn. Nhập lại file gốc.');return openWorkflowImport({signal:abort.signal,initialDocument:source.document,fileName:source.fileName});}));
   projectMenu.append(projectToggle, projectOptions);
   cluster.append(projectMenu);
   projectOptions.prepend(backup);
@@ -754,6 +762,7 @@ export async function mountStudio(host, id) {
         media.preload = "metadata";
       } else media.alt = a.name;
       container.replaceChildren(media);
+      if(media.tagName==="AUDIO"){media.addEventListener("loadedmetadata",()=>{alignNewAsset(container);renderContext();scheduleWires();},{once:true});renderContext();}
       if (media.tagName === "VIDEO") media.addEventListener("loadedmetadata", () => {
         const node = container.closest(".cvn-node");
         if (!node) return;
@@ -862,6 +871,7 @@ export async function mountStudio(host, id) {
             patch: { text: text.value },
           });
         body.append(text);
+      } else if(n.type==="externalStep"){body.append(el("strong","Chưa ánh xạ · "+(n.data.externalSourceType||"Bước ngoài")),el("p","Bước được giữ để đối chiếu, chưa thực thi. Menu dự án → Xem nguồn / ánh xạ workflow nhập."));
       } else if (localNodeNames[n.type]) {
         body.append(icon(['voiceover','audioExtract'].includes(n.type)?'music':'video'),el('p',localNodeNames[n.type]));
       } else if (n.type === "generateText") {
@@ -1187,12 +1197,15 @@ export async function mountStudio(host, id) {
     }
   }
   function positionFloatingPanels() {
+    orb.classList.remove('avoid-composer','avoid-composer-left');const activeComposer=stage.querySelector('.cvn-node.selected > .inline-composer:not([hidden])');if(activeComposer){const a=activeComposer.getBoundingClientRect(),overlaps=()=>{const b=orb.getBoundingClientRect();return a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;};if(overlaps()){orb.classList.add('avoid-composer');if(overlaps())orb.classList.add('avoid-composer-left');}}
+
     if (context.hidden || selection.size !== 1) return;
     const card = stage.querySelector(`[data-id="${CSS.escape([...selection][0])}"]`);
     if (!card) return;
     context.style.left = card.offsetLeft + card.offsetWidth / 2 + "px";
     // The preview block includes its title, with the same gap above and below.
     context.style.top = card.offsetTop - 28 - 24 - context.offsetHeight + "px";
+    if(!context.hidden){const box=context.getBoundingClientRect(),bounds=viewport.getBoundingClientRect(),dx=box.left<bounds.left+12?bounds.left+12-box.left:box.right>bounds.right-12?bounds.right-12-box.right:0,dy=Math.max(0,bounds.top+82-box.top);if(dx)context.style.left=(parseFloat(context.style.left)+dx/pan.zoom)+'px';if(dy)context.style.top=(parseFloat(context.style.top)+dy/pan.zoom)+'px';}
   }
   function renderContext() {
     const movingNode = drag?.mode === "node" && drag.moving;
@@ -1213,8 +1226,8 @@ export async function mountStudio(host, id) {
     const n = controller.snapshot().nodes.find((n) => selection.has(n.id));
     if (!n) return;
     const card = stage.querySelector(`[data-id="${CSS.escape(n.id)}"]`);
-    const hasMedia = Boolean(card?.querySelector('.cvn-node-body > img,.cvn-node-body > video'));
-    if (!["generateText", "prompt", "generateImage", "imageInput", "generateVideo", "videoInput"].includes(n.type) && !hasMedia) return;
+    const hasMedia = Boolean(card?.querySelector('.cvn-node-body > img,.cvn-node-body > video,.cvn-node-body > audio'));
+    if (!["generateText", "prompt", "negativePrompt", "generateImage", "imageInput", "generateVideo", "videoInput", "audioInput", "audioExtract", "voiceover"].includes(n.type) && !hasMedia) return;
     const toolbarKey = JSON.stringify([n.id, n.type, n.data, hasMedia, connectionCapabilities]);
     if (renderedContextKey === toolbarKey && contextCard === card) {
       context.hidden = false; positionFloatingPanels(); return;
@@ -1252,6 +1265,7 @@ export async function mountStudio(host, id) {
       positionFloatingPanels();
       return;
     }
+    if(card?.querySelector('.cvn-node-body > audio')) {context.hidden=false;context.classList.remove('cvn-video-toolbar');context.setAttribute('aria-label','Công cụ âm thanh đã chọn');context.append(button('Tải âm thanh',()=>downloadNode(n)),button('Hậu kỳ âm thanh',async()=>openPostWorkbench(await readAsset(n.data.assetId),{signal:abort.signal,initialOperation:'transcribe',onResult:asset=>addAssetNode(asset)})),button('Nhân bản',()=>duplicateNode(n)));positionFloatingPanels();return;}
     const image = card?.querySelector(".cvn-node-body > img"),
       video = card?.querySelector(".cvn-node-body > video");
     const isVideo = Boolean(video || ["generateVideo", "videoInput"].includes(n.type)),
@@ -1302,9 +1316,9 @@ export async function mountStudio(host, id) {
     } else {
       const primary = el("div", undefined, "image-primary-tools"),
         utilities = el("div", undefined, "image-utility-tools"),
-        tools = availableImageTools(connectionCapabilities);
+        tools = availableImageTools(connectionCapabilities,Object.fromEntries(["image.upscale","image.region-edit","image.multiview","image.layers","image.panorama"].map(operation=>[operation,async()=>openAdvancedImageWorkbench(await readAsset(n.data.assetId),{operation,signal:abort.signal,onResult:asset=>{if(!disposed)return addAssetNode(asset);}})])));
       const action = tool => {
-        const b = button("", () => imageTool(n, tool.mode));
+        const b = button("", () => tool.handler?tool.handler():imageTool(n, tool.mode));
         b.append(icon(tool.icon));
         b.disabled = !image;
         b.title = image ? tool.label : "Cần ảnh kết quả trước: " + tool.label;
@@ -1312,7 +1326,7 @@ export async function mountStudio(host, id) {
         if (["edit", "grid"].includes(tool.mode)) b.append(el("span", tool.mode === "edit" ? "Chỉnh sửa ảnh" : tool.label));
         return b;
       };
-      for (const tool of tools.filter(tool => !["rotate", "draw", "view"].includes(tool.mode))) primary.append(action(tool));
+      for (const tool of tools.filter(tool => !tool.handler && !["rotate", "draw", "view"].includes(tool.mode))) primary.append(action(tool));
       const more = el("details", undefined, "image-more-menu"),
         label = el("summary"), menu = el("div");
       label.append(el("span", "Thêm"), icon("chevronDown"));
@@ -1327,6 +1341,7 @@ export async function mountStudio(host, id) {
           editor.append(el("p", asset.name), el("p", `${image.naturalWidth} × ${image.naturalHeight} px`), el("p", asset.blob.type + " · " + (asset.blob.size / 1024).toLocaleString("vi-VN", { maximumFractionDigits: 1 }) + " KB"));
         }),
       );
+      for(const tool of tools.filter(tool=>tool.handler))menu.append(button(tool.label,()=>{more.open=false;return tool.handler();}));
       if (!image) for (const item of menu.querySelectorAll("button")) item.disabled = true;
       more.append(label, menu);
       primary.append(more);
@@ -1527,7 +1542,9 @@ export async function mountStudio(host, id) {
         provider.replaceChildren(new Option(available.length ? "Chọn AI…" : "Chưa có AI kết nối", ""));
         for (const item of available) provider.add(new Option(item.name, item.id));
         provider.value = available.some(item => item.id === chosen) ? chosen : "";
-        connection.hidden = !provider.value || ["openai", "google"].includes(provider.value);
+        connection.hidden = !provider.value || isAPIProvider(provider.value);
+        applyGenerationCaps();
+        if(!connection.hidden&&bindings.has(id))void refreshTabs();
       } catch (error) {
         if (composer.isConnected && revision === providerRevision) {
           provider.replaceChildren(new Option("Chưa có AI kết nối", ""));
@@ -1544,7 +1561,7 @@ export async function mountStudio(host, id) {
     ratioGrid.setAttribute("role", "group");
     ratioGrid.setAttribute("aria-label", "Chọn tỷ lệ khung");
     const syncRatioButtons = () => {
-      for (const b of ratioGrid.children) b.setAttribute("aria-pressed", String(b.dataset.ratio === ratio.value));
+      for (const b of ratioGrid.children) {b.setAttribute("aria-pressed", String(b.dataset.ratio === ratio.value));b.disabled=[...ratio.options].find(o=>o.value===b.dataset.ratio)?.disabled||false;}
     };
     for (const option of ratio.options) {
       const tile = button("", () => {
@@ -1562,7 +1579,7 @@ export async function mountStudio(host, id) {
     }
     syncRatioButtons();
     duration.setAttribute("aria-label", "Thời lượng");
-    for (const d of [5, 10, 15, 30, 40])
+    for (const d of [4, 5, 6, 8, 10, 15, 30, 40])
       duration.add(new Option(d + " giây", d));
     duration.value = String(n.data.duration || 5);
     duration.hidden = kind !== "video";
@@ -1597,7 +1614,7 @@ export async function mountStudio(host, id) {
       group.setAttribute("aria-label", title);
       section.append(el("h3", title));
       const sync = () => {
-        for (const button of group.children) button.setAttribute("aria-pressed", String(button.dataset.value === control.value));
+        for (const button of group.children) {button.setAttribute("aria-pressed", String(button.dataset.value === control.value));button.disabled=[...control.options].find(o=>o.value===button.dataset.value)?.disabled||false;}
       };
       for (const option of control.options) {
         const tile = button(option.textContent, () => {
@@ -1633,7 +1650,9 @@ export async function mountStudio(host, id) {
     settingsBody.append(kind === "video"
       ? choiceSection("Thời lượng video", duration, "duration", true)
       : choiceSection("Số lượng ảnh", count, "count", true));
-    settingsBody.append(el("small", "Đây là yêu cầu đầu ra. Kết quả phụ thuộc model và kết nối AI bạn chọn."));
+    const capabilityNote=el('small','Đây là yêu cầu đầu ra. Kết quả phụ thuộc model và kết nối AI bạn chọn.');settingsBody.append(capabilityNote);
+    function applyGenerationCaps(){const caps=generationCapabilities(provider.value,kind),patch={};for(const[control,key,allowed]of [[ratio,'size',caps?.ratios],[quality,'quality',caps?.qualities],[resolution,'resolution',caps?.resolutions],[background,'background',caps?.backgrounds],[duration,'duration',caps?.durations]]){for(const option of control.options)option.disabled=!!allowed&&!allowed.includes(control===duration?Number(option.value):option.value);if(control.selectedOptions[0]?.disabled){control.value=String(allowed[0]);patch[key]=control===duration?Number(control.value):control.value;}}if(Object.keys(patch).length){updateInline(id,patch);const body=stage.querySelector(`[data-id="${CSS.escape(id)}"] > .cvn-node-body`);if(body)setPreviewRatio(body,ratio.value);}capabilityNote.textContent=caps?.note||'Các thông số là yêu cầu; tab AI có giới hạn theo model đang chọn trên website.';syncRatioButtons();for(const sync of syncGroups)sync();refreshSummary();}
+
     ratio.onchange = () => {
       updateInline(id, { size: ratio.value });
       const body = stage.querySelector(`[data-id="${CSS.escape(id)}"] > .cvn-node-body`);
@@ -1646,6 +1665,7 @@ export async function mountStudio(host, id) {
     refreshSummary();
     summary.addEventListener("click", event => { if (event.detail > 1) event.preventDefault(); });
     tabSummary.addEventListener("click", event => { if (event.detail > 1) event.preventDefault(); });
+    if(kind==='video'){const mode=el('select');mode.setAttribute('aria-label','Chế độ video API');for(const[v,label]of [['normal','Tạo video thông thường'],['firstLast','Hai ảnh đầu → cuối · Veo API/fal'],['motion','Ảnh + video chuyển động · fal']])mode.add(new Option(label,v));mode.value=n.data.videoMode||'normal';mode.onchange=()=>updateInline(id,{videoMode:mode.value});settingsBody.append(el('h3','Chế độ video API'),mode);}
     settingsBody.prepend(popupHeading("Thông số", () => { settings.open = false; }, "Đóng thông số"));
     settings.append(summary, settingsBody);
     settings.hidden = kind === "text";
@@ -1711,11 +1731,13 @@ export async function mountStudio(host, id) {
             offline.disabled = true;
             tabs.add(offline);
           }
-          tabs.value = String(saved.id);
+          const current=available.find(tab=>tab.id===saved.id);
+          tabs.value = current&&current.url!==saved.url?'':String(saved.id);
+          if(current&&current.url!==saved.url)hint.textContent='Tab đã đổi cuộc trò chuyện. Chọn lại để xác nhận, chưa tự gán lại.';
         }
         tabLabelRefreshers.get(id)?.();
         hint.textContent = available.length
-          ? ""
+          ? (saved&&available.some(tab=>tab.id===saved.id&&tab.url!==saved.url)?'Tab đã đổi cuộc trò chuyện. Chọn lại để xác nhận, chưa tự gán lại.':'')
           : "Chưa có tab kết nối. Mở Kết nối AI ở góc trên.";
       } catch (e) {
         if (composer.isConnected && seq === tabRevision)
@@ -1737,19 +1759,21 @@ export async function mountStudio(host, id) {
           provider: provider.value,
         });
       else bindings.delete(id);
+      updateInline(id,{tabBinding:bindings.has(id)?JSON.stringify(bindings.get(id)):''});
       for (const update of tabLabelRefreshers.values()) update();
     };
     provider.onchange = () => {
       providerRevision++;
-      updateInline(id, { provider: provider.value });
+      applyGenerationCaps();
+      updateInline(id, { provider: provider.value,tabBinding:'' });
       bindings.delete(id);
       for (const update of tabLabelRefreshers.values()) update();
       tabs.replaceChildren(new Option("Chọn tab AI…", ""));
       refreshTabSummary();
-      connection.hidden = ["openai", "google"].includes(provider.value);
+      connection.hidden = isAPIProvider(provider.value);
       if (!connection.hidden && provider.value) { connection.open = true; void refreshTabs(); }
     };
-    connection.hidden = ["openai", "google"].includes(provider.value);
+    connection.hidden = isAPIProvider(provider.value);
     queueMicrotask(() => void refreshProviders());
     const send = button(
       "↑",
@@ -2358,8 +2382,8 @@ export async function mountStudio(host, id) {
     provider.setAttribute('aria-label','AI chạy toàn bộ luồng');tabs.setAttribute('aria-label','Tab chạy toàn bộ luồng');
     provider.add(new Option(generators.length?'Chọn AI…':'Xử lý local · không gửi AI',generators.length?'':'local'));
     if(generators.length){const kind=generators.some(node=>node.type==='generateVideo')?'video':generators.some(node=>node.type==='generateImage')?'image':'text';for(const item of await connectedAI(kind))if(generators.every(node=>item.types.includes(node.type==='generateText'?'text':node.type==='generateVideo'?'video':'image')))provider.add(new Option(item.name,item.id));}
-    provider.onchange=async()=>{tabs.replaceChildren(new Option('Chọn đúng tab chạy cả luồng',''));if(!['local','google','openai',''].includes(provider.value))for(const tab of await api('tabs?provider='+provider.value)){const option=new Option(tab.title||tab.url,tab.id);option.dataset.url=tab.url;tabs.add(option);}};
-    editor.append(provider,tabs,reuseLabel,button('Chạy luồng đã chốt',async()=>{if(!provider.value)throw Error('Chọn AI đang kết nối.');const tab=tabs.value?{id:Number(tabs.value),url:tabs.selectedOptions[0].dataset.url}:null;if(!['local','google','openai'].includes(provider.value)&&!tab)throw Error('Chọn tab chạy toàn bộ luồng.');editor.close();await executeGraph(controller.snapshot(),provider.value,tab,reuse.checked);}),button('Dừng luồng',async()=>{const jobId=activeJobs.get('__all__');if(jobId)await stopJob(jobId);}));
+    provider.onchange=async()=>{tabs.replaceChildren(new Option('Chọn đúng tab chạy cả luồng',''));if(provider.value&&provider.value!=='local'&&!isAPIProvider(provider.value))for(const tab of await api('tabs?provider='+provider.value)){const option=new Option(tab.title||tab.url,tab.id);option.dataset.url=tab.url;tabs.add(option);}};
+    editor.append(provider,tabs,reuseLabel,button('Chạy luồng đã chốt',async()=>{if(!provider.value)throw Error('Chọn AI đang kết nối.');const tab=tabs.value?{id:Number(tabs.value),url:tabs.selectedOptions[0].dataset.url}:null;if(provider.value!=='local'&&!isAPIProvider(provider.value)&&!tab)throw Error('Chọn tab chạy toàn bộ luồng.');editor.close();await executeGraph(controller.snapshot(),provider.value,tab,reuse.checked);}),button('Dừng luồng',async()=>{const jobId=activeJobs.get('__all__');if(jobId)await stopJob(jobId);}));
   }
   async function showProjectRuns() {
     resourcePanel('Lượt chạy của Canvas');

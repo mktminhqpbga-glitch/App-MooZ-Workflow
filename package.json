@@ -1,6 +1,6 @@
 {
   "name": "mooz-cvn",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,7 +15,7 @@
     "package:linux:test": "node scripts/prepare-depth.mjs && electron-builder --linux dir --publish never",
     "test:local-media": "node tests/local-media.browser.cjs",
     "test:packaged": "node tests/packaged.browser.cjs",
-    "test:all": "npm test && npm run test:browser && node tests/dock.browser.cjs && node tests/relay-settings.browser.cjs && node tests/depth-video.browser.cjs && node tests/canvas-review.browser.cjs && node tests/queue-flow.browser.cjs && node tests/finishing.browser.cjs && node tests/local-media.browser.cjs"
+    "test:all": "npm test && npm run test:browser && node tests/dock.browser.cjs && node tests/relay-settings.browser.cjs && node tests/depth-video.browser.cjs && node tests/canvas-review.browser.cjs && node tests/queue-flow.browser.cjs && node tests/finishing.browser.cjs && node tests/local-media.browser.cjs && node tests/workflow-tools.browser.cjs && node tests/advanced-tools.browser.cjs && node tests/custom-provider.browser.cjs && node tests/recipe-run.browser.cjs && node tests/exchange-maintenance.browser.cjs && node tests/finishing-extras.browser.cjs"
   },
   "engines": {
     "node": ">=22"
@@ -27,9 +27,10 @@
     "playwright": "1.58.2"
   },
   "dependencies": {
+    "image-size": "2.0.2",
     "ws": "8.22.0"
   },
-  "description": "MooZ CVN \u00b7 Canvas, h\u00e0ng \u0111\u1ee3i v\u00e0 h\u1eadu k\u1ef3 media",
+  "description": "MooZ CVN · Canvas, hàng đợi và hậu kỳ media",
   "author": "MooZ CVN",
   "license": "GPL-2.0-or-later",
   "main": "desktop/main.cjs"

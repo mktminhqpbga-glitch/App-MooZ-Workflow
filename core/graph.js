@@ -1,5 +1,7 @@
+import {parseTabBinding} from './tab-binding.js';
 // Portable graph contract: no DOM, Electron or provider access.
 const dataNodeTypes = {
+  externalStep: { inputs: {}, outputs: {} },
   prompt: { inputs: {}, outputs: { text: "text" } },
   imageInput: { inputs: {}, outputs: { image: "image" } },
   videoInput: { inputs: {}, outputs: { video: "video" } },
@@ -16,6 +18,7 @@ const dataNodeTypes = {
   },
   preview: { inputs: { media: "media" }, outputs: {} },
   captureLastFrame: { inputs: { video: "video" }, outputs: { image: "image" } },
+  storeVideo: { inputs: { video: "video" }, outputs: { video: "video" } },
   assembleVideo: { inputs: { videos: "video", audio: "audio" }, outputs: { video: "video" } },
   ...Object.fromEntries(['videoTrim','videoRotate','videoColor','frameFit','audioMix','subtitles','voiceSync','transition','speed','watermark'].map(type => [type, { inputs: { video: "video", audio: "audio", text: "text", reference: "image" }, outputs: { video: "video" } }])),
   audioExtract: { inputs: { video: "video" }, outputs: { audio: "audio" } },
@@ -31,11 +34,15 @@ export const nodeTypes = Object.freeze(Object.fromEntries(
 ));
 const allowed = [
   "customName",
+  "externalSourceType",
+  "importWarning",
   "text",
   "studioPrompt",
   "provider",
+  "tabBinding",
   "size",
   "duration",
+  "videoMode",
   "assetId",
   "expectedKind",
   "stylePrompt",
@@ -98,7 +105,8 @@ export function validateGraph(value) {
     for (const key of allowed) {
       if (!Object.hasOwn(n.data, key)) continue;
       const v = n.data[key];
-      if (["sceneIndex", "sceneCount"].includes(key)) {
+      if (key === "tabBinding") { if(typeof v!=="string")throw Error("Lựa chọn tab cần chuỗi JSON.");parseTabBinding(v);
+      } else if (["sceneIndex", "sceneCount"].includes(key)) {
         if (!Number.isInteger(v) || v < 1 || v > 12) throw Error("Chỉ hỗ trợ 1–12 cảnh.");
       } else if (["localSettings", "referenceRoles"].includes(key)) {
         if (typeof v !== 'string' || v.length > 50000) throw Error('Thông số local không hợp lệ.');
@@ -126,6 +134,7 @@ export function validateGraph(value) {
       } else if (key === "background") {
         if (!["auto", "preserve", "transparent"].includes(v))
           throw Error("Nền ảnh không hợp lệ.");
+      } else if(key==="videoMode"){if(!["normal","firstLast","motion"].includes(v))throw Error("Chế độ video không hợp lệ.");
       } else if (key === "duration") {
         if (v !== null && (!Number.isInteger(v) || v < 1 || v > 120))
           throw Error("Thời lượng không hợp lệ.");

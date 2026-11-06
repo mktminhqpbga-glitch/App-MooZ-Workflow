@@ -52,3 +52,9 @@ export function buildContinuation({ source, sourceDuration, targetDuration, dura
   const output=add('assembleVideo','MP4 đủ thời lượng',{localSettings:JSON.stringify({targetDuration})},700+count*720,0);for(const clip of clips)edge(clip,output,'video','videos');
   if(graph.nodes.length>40||graph.edges.length>120)throw Error('Luồng tiếp nối vượt 40 node / 120 dây.');return validateGraph(graph);
 }
+
+export function buildFirstLast({first,last,prompt,references=[],size='16:9',duration=8,...generation}){
+ if(!first||!last||first===last)throw Error('Chọn hai ảnh đầu/cuối khác nhau.');
+ if(!references.some(r=>r.id===first)||!references.some(r=>r.id===last)||references.some(r=>![first,last].includes(r.id)))throw Error('Đầu → Cuối chỉ nhận đúng hai ảnh đã chọn, không thêm ảnh khác hoặc @tag ảnh khác.');
+ const graph=emptyGraph(),a={id:crypto.randomUUID(),type:'imageInput',x:0,y:0,data:{assetId:first,customName:'Khung đầu'}},b={id:crypto.randomUUID(),type:'imageInput',x:0,y:250,data:{assetId:last,customName:'Khung cuối'}},video={id:crypto.randomUUID(),type:'generateVideo',x:500,y:0,data:{customName:'Video Đầu → Cuối',studioPrompt:prompt,size,duration,videoMode:'firstLast',referenceOrder:JSON.stringify([first,last]),...generation}};graph.nodes=[a,b,video];graph.edges=[a,b].map(source=>({id:crypto.randomUUID(),source:source.id,target:video.id,sourcePort:'image',targetPort:'reference'}));return validateGraph(graph);
+}
