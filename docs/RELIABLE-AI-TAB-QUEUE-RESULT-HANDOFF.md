@@ -30,14 +30,14 @@ flowchart LR
 
 ### 2.1 Lỗi “tab/chat đã thay đổi” dù không động Chrome
 
-`server/connection.mjs` hiện có hai phép so chuỗi URL tuyệt đối:
+`server/connection.mjs` hiện chặn URL bằng phép so chuỗi tuyệt đối ở bước `check()`. Sau khi gửi, `generate()` gọi `acceptedChatURL()`; hàm này chỉ chấp nhận URL giữ nguyên hoặc chuyển tiếp New chat → `/c/...` **riêng ChatGPT**. Muse trong ảnh không được hưởng ngoại lệ đó:
 
 ```js
 if (input.chatURL && tab.url !== input.chatURL)
   throw Error("Cuộc trò chuyện đã thay đổi; chưa gửi yêu cầu.");
 
-// Sau chrome.generate()
-if (latest.url !== input.chatURL)
+// Sau chrome.generate() — Muse đổi URL vẫn bị chặn
+if (!acceptedChatURL(input.chatURL, latest.url, result.chatURL, input.provider))
   throw Error("Tab đã đổi cuộc trò chuyện. Kiểm tra kết quả thủ công; không tự gửi lại.");
 ```
 
@@ -294,7 +294,7 @@ Mỗi event ghi `timestamp`, `jobId`, `requestId`, `provider`, `deviceId` ẩn b
 ## 9. Thứ tự thực hiện cho đối tác
 
 1. **Khóa hợp đồng trạng thái và ID:** định nghĩa `tabIdentity`, `conversationIdentity`, `requestId`, `jobId`, `resultItemId`, `assetId`; tạo migration cho job/asset cũ. Đây là nền để không lẫn kết quả.
-2. **Sửa nhận diện chat:** thay hai so sánh URL tuyệt đối trong `server/connection.mjs` bằng identity do bridge cung cấp, hỗ trợ New chat → ID khi có bằng chứng cùng lượt. Thêm test website tự đổi URL và test user đổi chat thật.
+2. **Sửa nhận diện chat:** thay kiểm URL tuyệt đối ở `check()` và mở rộng `acceptedChatURL()` ở `generate()`/`recover()` bằng identity do bridge cung cấp cho Muse, hỗ trợ New chat → ID khi có bằng chứng cùng lượt. Thêm test website tự đổi URL và test user đổi chat thật.
 3. **Sửa queue/busy:** `TAB_BUSY` trở thành `waiting_tab` trong `server/jobs.mjs` + `core/queue-runner.js` + `core/runner.js`; bổ sung lease bền vững/recovery, event tab rảnh và backoff. Test A chạy, B chọn A, C chọn B, provider limit; không có lượt gửi trùng.
 4. **Sửa ranh giới sent:** chỉ đánh dấu `sent` sau bằng chứng bridge đã bấm/website nhận; trước đó lỗi là chưa gửi. Sau đó mọi timeout vào `unknown_sent` + STATUS, không auto POST mới.
 5. **Sửa contract result list:** bridge `items[]`, server trả manifest, API adapters duyệt mọi phần tử hợp lệ; chuyển Blob sang asset store riêng, cập nhật `core/runner.js`, `core/output-state.js` và Canvas để giữ mọi item, selected ID và lỗi từng item. Test 1, 2, 4 ảnh; video poster→clip thật.
@@ -320,3 +320,398 @@ Mỗi event ghi `timestamp`, `jobId`, `requestId`, `provider`, `deviceId` ẩn b
 | Bản web static không có API | Báo rõ cần backend, không hiển thị tab AI “sẵn sàng” giả. |
 
 **Các file ưu tiên mở:** `server/connection.mjs` (kiểm tab/chat và response), `server/jobs.mjs` (record/lease), `server.mjs` (thời điểm `sent`, API job), `core/queue-runner.js` (cấp việc), `core/runner.js` (snapshot/checkpoint/storeResult), `core/output-state.js` (gán asset vào node), `client-api.js` (API và trạng thái), `studio.js` (preview, kết quả, cài đặt), `vendor/mooz/desktop/chrome-relay.cjs` (socket/recovery), bridge Muse/Gemini/ChatGPT trong gói MooZ Connect tương ứng. Nếu sửa bridge vendored, cần cập nhật cả nguồn extension và gói ZIP phát hành; thay file server thôi không nạp được content script mới trong tab đã mở.
+
+## 11. Mã mẫu để đối tác triển khai: trạng thái và ranh giới trách nhiệm
+
+**Lưu ý trước khi chép code:** các đoạn từ mục 11 trở đi là **mẫu thiết kế mới**, chưa có sẵn nguyên dạng trong repo. Tên hàm `database.transaction`, `bridge.inspect`, `adapter.collect` và `assetStore.put` là interface cần đối tác tự nối vào storage/extension hiện tại. Không thể chỉ dán một đoạn vào `server.mjs` rồi cho rằng lỗi đã xong. Dùng các đoạn này như contract, tách thành module và viết test cho từng cổng. Ví dụ giả định **một tiến trình server**; khi chạy nhiều instance phải thay lock bằng transaction/unique constraint của database dùng chung.
+
+### 11.1 Trạng thái job: đặc biệt tách “tab đang bận” khỏi “đã gửi”
+
+```js
+// Mẫu contract dùng chung frontend/server. Tên status có thể đổi nhưng nghĩa không đổi.
+export const JobState = Object.freeze({
+  QUEUED: 'queued',             // Có yêu cầu; CHƯA gửi.
+  WAITING_TAB: 'waiting_tab',   // Tab đúng đang bận; CHƯA gửi.
+  PREPARING: 'preparing',       // Đang kiểm tab, upload ảnh; CHƯA bấm gửi.
+  DISPATCHING: 'dispatching',   // Đã ra lệnh bấm gửi, chưa biết website nhận chưa.
+  SENT: 'sent',                 // Bridge chứng thực website đã nhận tin user.
+  COLLECTING: 'collecting',     // Có phản hồi mới, đang tải/ghi tệp.
+  PARTIAL: 'partial',           // Đã lưu một số item, còn item thiếu/hỏng.
+  DONE: 'done',                 // Tất cả item được xác nhận đã lưu.
+  UNKNOWN_SENT: 'unknown_sent', // Có thể đã gửi; CẤM gửi lại tự động.
+  NEEDS_REVIEW: 'needs_review', // Không đủ bằng chứng tab/chat/result.
+  ERROR: 'error',               // Lỗi chắc chắn trước gửi hoặc lỗi cuối có bằng chứng.
+});
+
+// Mỗi request sinh đúng một lần, tại thời điểm người dùng xếp hàng.
+const request = {
+  requestId: crypto.randomUUID(), // idempotency key; không tạo lại khi retry status
+  jobId: crypto.randomUUID(),
+  provider: 'muse', mediaType: 'image',
+  selectedTabId: 123,            // pin đúng tab đã chọn
+  prompt: '...',
+  settings: { ratio: '1:1', quality: 'standard', resolution: '2K', count: 1 },
+  referenceAssetIds: [],         // tùy chọn; snapshot ảnh tại thời điểm xếp hàng
+  createdAt: new Date().toISOString(),
+};
+```
+
+**Bất biến bắt buộc:** `QUEUED/WAITING_TAB/PREPARING` có thể thử lại vì chưa gửi; `DISPATCHING/SENT/COLLECTING/UNKNOWN_SENT` chỉ được `STATUS/RESULT` cùng `requestId`, không gọi `GENERATE` lần hai. `DONE` chỉ khi asset tải và lưu xong. `TAB_BUSY` là tình trạng tài nguyên, không phải kết quả cuối. Khi nút Hủy được bấm trong `WAITING_TAB`, xóa khỏi queue; khi đã `SENT`, nút Hủy chỉ dừng theo dõi/hiển thị hoặc gửi lệnh hủy nếu website hỗ trợ và có ACK, không khẳng định tác vụ AI trên website đã hủy.
+
+### 11.2 Gói tin gửi–nhận: phân biệt HTTP, relay và website AI
+
+Trong app hiện tại, frontend gọi `POST /api/jobs` vào Node. Node hỏi relay qua WebSocket bằng RPC `tabs.get`, `tabs.script`, `tabs.message`. Relay chuyển tới MooZ Connect trong Chrome; content script đọc và thao tác DOM website Muse. Đây là **tự động hóa trình duyệt**, không phải Muse cung cấp một API chính thức cho MooZ. WebSocket dùng để giữ phiên và gửi RPC hai chiều; `requestId` bảo đảm định danh/idempotency ở cấp nghiệp vụ; `messageId` của relay định danh một lệnh vận chuyển. Hai ID không thay cho nhau.
+
+```json
+{
+  "type": "JOB_START",
+  "protocolVersion": 2,
+  "messageId": "transport-command-uuid",
+  "requestId": "business-request-uuid",
+  "provider": "muse",
+  "tabId": 123,
+  "tabEpoch": "content-script-instance-uuid",
+  "chat": { "mode": "provisional", "providerChatId": null, "observedUrl": "https://..." },
+  "mediaType": "image",
+  "prompt": "...",
+  "settings": { "ratio": "1:1", "quality": "standard", "resolution": "2K", "count": 1 },
+  "referenceImages": []
+}
+```
+
+Đây là **gói tin mục tiêu**, chưa phải tên message đang chạy. Code hiện tại gửi `MUSEFLOW_GENERATE` hoặc `WORKFLOW_AI_GENERATE`; có thể giữ tên cũ và bổ sung trường/ACK theo phiên bản, hoặc nâng lên `MUSEFLOW_JOB_START` có negotiation. Bắt buộc kiểm `protocolVersion` và khả năng extension trước khi gửi; nếu bản mở rộng cũ, báo “cần cập nhật MooZ Connect”, không thử nửa giao thức mới. `STATUS(requestId)` phải chỉ hỏi trạng thái; `RESULT(requestId)` chỉ lấy manifest/media của lượt đã gửi; chúng không bấm nút gửi trên website.
+
+| Gói phản hồi | Ý nghĩa | Server phải làm |
+| --- | --- | --- |
+| `READY` | Đúng tab, đã đăng nhập, composer hoạt động | Có thể chuẩn bị; chưa đánh dấu sent. |
+| `BUSY` | Website/bridge đang tạo lượt khác | Chuyển `waiting_tab`; giữ tab đã chọn. |
+| `PREPARED` | Ảnh tham chiếu đã upload/xác nhận và setting đã áp dụng | Ghi checkpoint, vẫn chưa sent. |
+| `SEND_CONFIRMED` | Tin user của chính request đã xuất hiện | Ghi `sentAt`, chat ID thực và dấu vân tay tin. |
+| `RESULT_PENDING` | Đang sinh/stream/tải | Tiếp tục status/collect, không tạo request mới. |
+| `RESULT_ITEM` | Một output thuộc assistant turn mới | Validate và lưu từng item. |
+| `RESULT_COMPLETE` | Không còn item mới theo tiêu chí adapter | Commit manifest; `done` nếu mọi item lưu đủ. |
+| `AMBIGUOUS` | Không chứng minh được chat/lượt/file | `needs_review`, không đoán. |
+
+**Timeout:** timeout HTTP hoặc socket không nói được website đã nhận hay chưa. Nếu mất trước lệnh bấm gửi và bridge chứng minh không có tin user, job trở lại `queued/waiting_tab`. Nếu lệnh đã phát hoặc không biết rõ, giữ `unknown_sent`; hỏi STATUS của đúng `requestId`, inspect chat, rồi quyết định. Không coi mất heartbeat 20 giây là lý do tạo request mới. Relay chỉ có cửa sổ recovery khoảng 90 giây khi extension đã thương lượng `resultRecovery:1` và close code thuộc nhóm recoverable; vượt cửa sổ thì yêu cầu đối chiếu, không tự tạo lại job.
+
+### 11.3 Giữ tab và chat bằng danh tính có bằng chứng
+
+```js
+// Pseudocode adapter; triển khai riêng cho Muse, ChatGPT, Gemini.
+function compareConversation(pinned, observed, evidence) {
+  if (pinned.deviceId !== observed.deviceId || pinned.tabId !== observed.tabId)
+    return { action: 'review', code: 'TAB_ID_CHANGED' };
+  if (pinned.tabEpoch && observed.tabEpoch !== pinned.tabEpoch)
+    return { action: 'inspect', code: 'CONTENT_SCRIPT_RELOADED' };
+  if (observed.provider !== pinned.provider)
+    return { action: 'review', code: 'PROVIDER_CHANGED' };
+
+  // Cùng chat ID: URL query/locale/slash đổi vẫn tiếp tục.
+  if (pinned.providerChatId && observed.providerChatId === pinned.providerChatId)
+    return { action: 'continue', chat: { ...pinned, observedUrl: observed.url } };
+
+  // Chat mới ban đầu chưa có ID. Chỉ bind sau khi thấy chính tin đã gửi.
+  if (!pinned.providerChatId && observed.providerChatId &&
+      evidence.requestId === pinned.pendingRequestId &&
+      evidence.userMessageFingerprint === pinned.sentMessageFingerprint)
+    return { action: 'bind', chat: { ...pinned,
+      providerChatId: observed.providerChatId, observedUrl: observed.url } };
+
+  // Nếu ID không đọc được: chỉ quy URL như bằng chứng yếu, không tự nhận output.
+  return { action: 'review', code: 'CHAT_IDENTITY_UNPROVEN' };
+}
+```
+
+`tabEpoch` thay đổi khi content script nạp lại không có nghĩa người dùng đổi chat; hỏi `tabs.get`/bridge để nhận diện lại. URL được lưu để hỗ trợ và chống nhập nhầm origin, nhưng phải canonicalize **theo từng provider**; không xóa bừa query vì website có thể dùng query để định danh chat. Với Muse, đội triển khai phải khảo sát URL/DOM khi New chat, sau lượt đầu, reload và chat khác bằng tài khoản thử. Nếu Muse không cung cấp chat ID đáng tin, dựa trên cặp `requestId + fingerprint của tin user + baseline assistant turn`, và ghi `needs_review` khi không chứng minh được. Không chấp nhận kết quả chỉ vì tab ID trùng.
+
+### 11.4 Scheduler thật: job B phải chờ A trên chính tab đó
+
+```js
+// Mẫu cho một server Node. db.* phải là transaction/constraint thật, không chỉ Map RAM.
+async function dispatchOne(jobId, db, bridge) {
+  const job = await db.getJob(jobId);
+  if (!['queued', 'waiting_tab'].includes(job.status)) return job;
+
+  const key = `${job.deviceId}:${job.selectedTabId}`;
+  const lease = await db.tryAcquireLease(key, job.requestId, { ttlMs: 120_000 });
+  if (!lease) return db.patchJob(jobId, {
+    status: 'waiting_tab', waitReason: 'LOCAL_TAB_LEASE', nextProbeAt: Date.now() + 2_000,
+  });
+
+  try {
+    const check = await bridge.inspect(job.selectedTabId);
+    if (check.busy) return db.patchJob(jobId, {
+      status: 'waiting_tab', waitReason: 'PROVIDER_BUSY', nextProbeAt: Date.now() + 3_000,
+    });
+    if (!check.ready) return db.patchJob(jobId, {
+      status: 'waiting_tab', waitReason: check.reason, nextProbeAt: Date.now() + 5_000,
+    });
+    await db.patchJob(jobId, { status: 'preparing' });
+    const prepared = await bridge.prepare(job); // upload ảnh, kiểm chat, áp setting
+    if (!prepared.ok) throw new Error(prepared.reason);
+
+    // Bắt đầu vùng không được gửi lại mù. Persist trước khi gọi bridge.clickSend.
+    await db.patchJob(jobId, { status: 'dispatching', dispatchStartedAt: Date.now() });
+    const ack = await bridge.clickSend(job.requestId, prepared);
+    if (!ack?.sendConfirmed) return db.patchJob(jobId, { status: 'unknown_sent' });
+    return db.patchJob(jobId, {
+      status: 'sent', sentAt: Date.now(), providerChatId: ack.providerChatId,
+      sentMessageFingerprint: ack.userMessageFingerprint,
+    });
+  } catch (error) {
+    const latest = await db.getJob(jobId);
+    return db.patchJob(jobId, {
+      status: ['dispatching', 'sent'].includes(latest.status) ? 'unknown_sent' : 'error',
+      errorCode: error.code || 'DISPATCH_FAILURE',
+    });
+  } finally {
+    await db.releaseLease(key, job.requestId);
+    await db.wakeWaitingForTab(key); // đẩy job kế tiếp; worker cũng polling làm dự phòng
+  }
+}
+```
+
+Đây mới là **gate gửi**, không nên giữ lock tới lúc AI tạo ảnh xong nếu provider cho phép nhiều lượt đang chạy; ngược lại nếu Muse báo busy xuyên suốt lúc generation, scheduler phải đợi tới khi adapter chứng minh tab rảnh. Thiết kế lease cần owner token/fencing để worker cũ không giải phóng lease của worker mới khi TTL hết. Nếu server chỉ một tiến trình, vẫn cần lưu `waiting_tab` và `nextProbeAt` xuống đĩa/database để restart khôi phục. Khi hồi phục, kiểm trạng thái mọi `dispatching/sent` trước rồi mới chạy job chờ, tránh dùng tab còn tác vụ. `server/jobs.mjs` hiện `run()` trả luôn record prior nếu request ID đã tồn tại; cần worker resume các record chờ, không tạo request ID mới.
+
+### 11.5 Bắt lỗi `TAB_BUSY` đúng nghĩa trong server và frontend
+
+```js
+// Mẫu vá ý nghĩa tại server/jobs.mjs — không áp dụng máy móc cho mọi lỗi.
+function classifyFailure(record, error) {
+  if (error.code === 'TAB_BUSY' && !record.sentAt) return {
+    status: 'waiting_tab', code: 'TAB_BUSY',
+    nextProbeAt: Date.now() + 3_000, error: null,
+  };
+  if (record.status === 'dispatching' || record.sentAt) return {
+    status: 'unknown_sent', code: error.code || 'RESULT_UNCERTAIN',
+  };
+  return { status: 'error', code: error.code || 'PRE_SEND_ERROR' };
+}
+
+// Mẫu frontend: giữ job trong queue; không đổi sang tab khác và không yêu cầu user bấm lại.
+function labelForJob(job) {
+  if (job.status === 'waiting_tab')
+    return `Đang chờ tab ${job.selectedTabId} rảnh · ${job.waitReason || 'AI đang xử lý'}`;
+  if (job.status === 'unknown_sent')
+    return 'Đang đối chiếu lượt đã gửi — chưa tạo yêu cầu mới';
+  if (job.status === 'collecting')
+    return `Đang lưu kết quả ${job.persistedCount || 0}/${job.observedCount || '?'}`;
+  return job.status;
+}
+```
+
+Phải sửa **cả** server và `core/runner.js`: hiện client đặt `job.status = 'sent'` trước `POST /api/jobs`, rồi response khác `success/error/queued` bị quy về `unknown`. Bổ sung `waiting_tab`, `partial`, `collecting`, `unknown_sent` vào contract API và vòng cấp việc. Nếu `POST /api/jobs` là request đồng bộ chờ AI nhiều phút, frontend/nginx/serverless có thể timeout dù AI vẫn chạy; ưu tiên `POST` trả `202 {requestId,status}` nhanh, sau đó `GET /api/jobs/:id` hoặc SSE/WebSocket event để theo dõi. `GET` phải đọc record bền vững, không làm phát sinh lệnh gửi.
+
+### 11.6 Content script: chụp baseline, upload, gửi một lần và trả ACK có chứng cứ
+
+```js
+// Mẫu logic trong adapter Muse content script; các hàm DOM phụ thuộc Muse thực tế.
+const byRequest = new Map(); // cache nhanh; cần journal bền vững ở extension/server
+
+async function startMuseJob(command, muse) {
+  const old = byRequest.get(command.requestId);
+  if (old) return old; // cùng requestId không click Send lần hai
+
+  const session = await muse.inspect();
+  if (!session.signedIn) return { code: 'SIGN_IN_REQUIRED', sendConfirmed: false };
+  if (session.busy) return { code: 'TAB_BUSY', sendConfirmed: false };
+  if (session.tabId !== command.tabId) return { code: 'TAB_ID_CHANGED' };
+
+  const baseline = await muse.snapshotAssistantTurns();
+  const inputHashes = await muse.hashUploadedReferences(command.referenceImages);
+  for (const reference of command.referenceImages) {
+    await muse.uploadReference(reference); // file chooser / drop / input theo adapter
+  }
+  await muse.waitUntilReferencesReady(command.referenceImages.length);
+  await muse.applySupportedSettings(command.settings);
+  const appliedSettings = await muse.readSettingsBack();
+  await muse.fillComposer(command.prompt);
+
+  // Ghi journal chuẩn bị trước click. Sau click, mọi lỗi/timeout là không chắc chắn.
+  const prepared = {
+    requestId: command.requestId, tabId: command.tabId, baseline,
+    inputHashes, appliedSettings, phase: 'dispatching',
+  };
+  await muse.persistJournal(prepared);
+  await muse.clickSend();
+  const userMessage = await muse.waitForNewUserMessage({
+    after: baseline.snapshotAt,
+    promptFingerprint: await muse.fingerprintPrompt(command.prompt),
+  });
+  if (!userMessage) return { requestId: command.requestId,
+    phase: 'unknown_sent', sendConfirmed: false };
+
+  const ack = {
+    requestId: command.requestId, phase: 'sent', sendConfirmed: true,
+    providerChatId: await muse.readChatId(),
+    observedUrl: location.href,
+    userMessageFingerprint: userMessage.fingerprint,
+    userMessageId: userMessage.id,
+    baseline, inputHashes, appliedSettings,
+  };
+  await muse.persistJournal(ack);
+  byRequest.set(command.requestId, ack);
+  return ack;
+}
+
+async function getMuseJobStatus(requestId, muse) {
+  const journal = await muse.readJournal(requestId);
+  if (!journal) return { requestId, phase: 'not_found' };
+  // Chỉ quan sát. Tuyệt đối không gọi clickSend ở đường STATUS.
+  const userMessage = await muse.findUserMessage(journal.userMessageId,
+    journal.userMessageFingerprint);
+  if (!userMessage && journal.phase === 'dispatching')
+    return { requestId, phase: 'unknown_sent' };
+  const observed = await muse.collectNewAssistantTurn(journal.baseline, userMessage);
+  return { requestId, phase: observed.complete ? 'result_ready' : 'pending',
+    providerChatId: journal.providerChatId, observedCount: observed.items.length };
+}
+```
+
+`Map` trong content script biến mất khi tab reload; journal phải được giữ ở extension storage hoặc server và gắn `requestId` với đúng tab/chat. Nếu website không cho đọc ID tin user, fingerprint phải gồm hash prompt, thứ tự tin và thời điểm sau baseline; hash prompt một mình không đủ nếu người dùng gửi cùng câu hai lần. `waitUntilReferencesReady` phải đợi UI hiển thị đúng số tệp, không đợi một timeout cố định. `applySupportedSettings` ghi được cái gì thì xác nhận cái đó; trường nào chỉ đưa trong prompt phải ghi `requested_only`.
+
+Không `return sendConfirmed: true` chỉ vì `clickSend()` không ném lỗi. Bằng chứng tối thiểu là tin user mới của chính lượt xuất hiện trong đúng chat. Nếu mất kết nối ngay sau click, journal `dispatching` khiến server đối chiếu thay vì gửi lần hai. Để xếp hàng chạy ổn qua restart, journal và record server phải đối chiếu theo `requestId` trước khi cấp job kế tiếp cho tab.
+
+## 12. Mã mẫu thu hồi toàn bộ kết quả và ghi vào node
+
+### 12.1 Quy tắc lấy đúng assistant turn, không lấy ảnh tham chiếu
+
+```js
+// Mẫu trong content script. Các selector/DOM helper phải viết riêng cho Muse.
+async function collectForRequest(adapter, request) {
+  const sent = await adapter.findUserMessage(request.sentMessageFingerprint);
+  if (!sent) return { state: 'needs_review', reason: 'SENT_MESSAGE_NOT_FOUND' };
+
+  const reply = await adapter.findAssistantTurnAfter(sent);
+  if (!reply) return { state: 'pending', items: [] };
+  const candidates = await adapter.enumerateMedia(reply); // toàn bộ media trong turn
+  const items = [];
+  for (const item of candidates) {
+    if (await adapter.isInputReference(item, request.referenceHashes)) continue;
+    if (item.kind !== request.mediaType) continue;
+    if (item.kind === 'video' && item.isPoster) continue;
+    const bytes = await adapter.downloadOriginal(item); // không giữ blob: URL làm kết quả
+    items.push({ itemId: item.stableId, kind: item.kind, bytes,
+      providerMessageId: reply.id });
+  }
+  return { state: await adapter.isTurnComplete(reply) ? 'complete' : 'pending', items };
+}
+```
+
+Trước bấm gửi, lưu baseline: ID tất cả assistant turn cũ, danh sách media cũ và hash ảnh input. Khi website không có ID turn, adapter phải chụp thứ tự/timestamp/fingerprint DOM và chứng minh reply xuất hiện **sau** tin user của request. Chỉ `img.src` hay `<video poster>` chưa đủ: website có thumbnail, lazy loading, CDN URL đổi theo kích thước. Dùng nguồn tải bản gốc khi hợp pháp và có thể; nếu không tải được, item ở trạng thái `observed_unavailable`, không báo done. Với video, tải `video/*` thật; MIME, chữ ký bytes và metadata duration/size phải khớp. Với text, lấy toàn bộ block sau khi streaming kết thúc, không cắt ở dòng đầu.
+
+### 12.2 Ghi từng item an toàn, không mất kết quả khi reconnect
+
+```js
+import { createHash } from 'node:crypto';
+
+async function persistItem({ requestId, itemId, kind, bytes, messageId }, db, assets) {
+  const existing = await db.findResultItem(requestId, itemId);
+  if (existing?.assetId) return existing; // ACK trùng sau reconnect không lưu file lần hai
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw Error('EMPTY_MEDIA');
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const metadata = await inspectMedia(bytes, kind); // MIME signature, decode, w/h/duration
+  if (!metadata.valid) throw Error('INVALID_MEDIA');
+  const blob = await assets.put(bytes, { sha256, kind, metadata });
+  // Nếu lưu metadata lỗi, blob orphan cần cleanup theo định kỳ; không ACK trước transaction.
+  const row = await db.transaction(async tx => tx.upsertResultItem({
+    requestId, itemId, kind, assetId: blob.assetId, sha256,
+    providerMessageId: messageId, ...metadata,
+  }));
+  return row;
+}
+
+async function finalizeJob(job, collected, db) {
+  const saved = await db.listResultItems(job.requestId);
+  const allObservedSaved = collected.items.every(item =>
+    saved.some(row => row.itemId === item.itemId && row.assetId));
+  const status = collected.state === 'complete' && allObservedSaved
+    ? 'done' : saved.length ? 'partial' : 'collecting';
+  await db.patchJob(job.id, { status, observedCount: collected.items.length,
+    persistedCount: saved.length, resultItemIds: saved.map(row => row.itemId) });
+  return { status, items: saved };
+}
+```
+
+`inspectMedia` phải đọc bytes, không tin phần mở rộng/HTTP header; giới hạn kích thước và thời gian tải, xử lý quota. Với media lớn, truyền chunk hoặc upload nội bộ có checksum rồi ACK từng item; không nhét cả base64 vào `record.result` JSON như đường hiện tại. Nếu mất mạng ở chunk 7, yêu cầu lại chunk/item thiếu, **không** gửi prompt lại. Nếu `assets.put` thành công nhưng transaction hỏng, đối chiếu hash và dọn orphan; nếu transaction thành công nhưng ACK mất, `upsert` trả asset cũ.
+
+### 12.3 Đưa tất cả item tới Canvas, chọn một bản cho đường nối
+
+```js
+// Mẫu chuyển đổi ở core/runner.js + core/output-state.js.
+function manifestToNodeOutput(manifest, selectedAssetId) {
+  const results = manifest.items.filter(x => x.assetId).map(x => ({
+    itemId: x.itemId, assetId: x.assetId, kind: x.kind,
+    width: x.width, height: x.height, duration: x.duration,
+    sha256: x.sha256,
+  }));
+  const selected = results.find(x => x.assetId === selectedAssetId) || results[0];
+  return { kind: selected?.kind, assetId: selected?.assetId || null,
+    selectedAssetId: selected?.assetId || null, results,
+    complete: manifest.status === 'done' };
+}
+
+// Khi job hoàn tất: node dùng selectedAssetId cho downstream, gallery giữ results[].
+job.outputs[nodeId] = manifestToNodeOutput(apiResult.manifest, job.outputs[nodeId]?.selectedAssetId);
+job.resultId = job.outputs[nodeId].selectedAssetId;
+await persistJob(job);
+```
+
+Chuyển `storeResult()` hiện tại từ một `result.url` sang manifest; giữ fallback đọc record cũ để không làm mất dự án đã lưu. Node trống nên hiển thị rõ `waiting_tab`, `sent`, `collecting`, `partial`, `needs_review`, cùng lỗi cụ thể; ô đen im lặng không đủ. Khi chuyển từ ảnh sang video qua edge, adapter video lấy `selectedAssetId` của ảnh phù hợp; các ảnh còn lại vẫn ở Kho/results. Nút “tải tất cả” lấy danh sách `results[]`, không chỉ ảnh đang xem.
+
+### 12.4 Cài đặt tạo ảnh/video: snapshot, áp dụng, xác minh
+
+| Cài đặt | Lúc xếp hàng | Khi gửi vào AI | Sau khi nhận |
+| --- | --- | --- | --- |
+| Loại ảnh/video | Ghi `mediaType` cố định vào request | Chọn đúng công cụ/chế độ nếu bridge hỗ trợ | MIME thực phải đúng; poster không thay video. |
+| Tỷ lệ `1:1`, `16:9`, `9:16`... | Ghi ratio gốc | Đặt UI website/API nếu hỗ trợ; nếu không, đưa vào prompt và đánh dấu `requested_only` | Tính width/height thực, tolerance có giải thích. |
+| Độ phân giải `1K/2K/4K`, `720P/1080P` | Ghi mức yêu cầu | Xác nhận control website đã được chọn; nếu không thì không nhận là applied | Lưu pixel thật, không lấy kích cỡ ảnh tham chiếu. |
+| Chất lượng/biến thể | Ghi label + số lượng | Map theo provider; đừng giả định `standard` của Muse trùng `medium` API | Đếm item được website trả và số item đã lưu. |
+| Thời lượng video | Ghi giây và giới hạn provider | Đặt control được hỗ trợ hoặc mô tả trong prompt | Dùng metadata duration file cuối. |
+| Ảnh nhân vật/tham chiếu | Lưu asset ID/hash, có thể rỗng | Upload xong, chờ thumbnail/ACK đúng số tệp trước gửi | Loại ảnh input khỏi output bằng hash/fingerprint. |
+
+Mỗi setting nên có `{requested, applied, observed}`. Ví dụ `{requested:'2K', applied:'requested_only', observed:{width:1586,height:992}}` cho thấy người dùng đã yêu cầu 2K nhưng kết quả chỉ là 1586×992; UI không hiển thị sai “2K thành công”. Không được gửi khi ảnh tham chiếu chưa upload xong. Một request đang chờ giữ nguyên snapshot setting dù người dùng đổi dropdown cho request sau.
+
+## 13. Test tự động tối thiểu để chứng minh đã sửa
+
+```js
+// node:test — minh họa contract. Thay createHarness bằng fixture server+bridge thật.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+test('Muse tự đổi URL sau gửi vẫn nhận đúng kết quả', async () => {
+  const h = await createHarness({ provider: 'muse', chatUrl: '/new' });
+  const id = await h.enqueue({ tabId: 7, prompt: 'Áo trắng' });
+  await h.bridge.confirmSent(id, { chatId: 'chat-A', url: '/chat/chat-A' });
+  await h.bridge.result(id, [{ id: 'img-1', bytes: h.validPng }]);
+  assert.equal((await h.job(id)).status, 'done');
+  assert.equal((await h.job(id)).items.length, 1);
+});
+
+test('hai job cùng tab: job B chờ rồi tự chạy, chỉ gửi một lần', async () => {
+  const h = await createHarness({ tabBusy: true });
+  const a = await h.enqueue({ tabId: 7, prompt: 'A' });
+  const b = await h.enqueue({ tabId: 7, prompt: 'B' });
+  assert.equal((await h.job(b)).status, 'waiting_tab');
+  assert.equal(h.bridge.sendCount(b), 0);
+  await h.complete(a);
+  await h.bridge.setBusy(false);
+  await h.tickQueue();
+  assert.equal(h.bridge.sendCount(b), 1);
+});
+
+test('mất ACK result không làm mất hoặc nhân bản hai ảnh', async () => {
+  const h = await createHarness();
+  const id = await h.enqueue({ tabId: 7, count: 2 });
+  await h.bridge.confirmSent(id, { chatId: 'chat-A' });
+  await h.bridge.result(id, [
+    { id: 'v1', bytes: h.validPng }, { id: 'v2', bytes: h.otherPng },
+  ], { dropAck: true });
+  await h.reconnectAndReplay(id);
+  const job = await h.job(id);
+  assert.deepEqual(job.items.map(x => x.itemId), ['v1', 'v2']);
+  assert.equal(await h.assetCount(id), 2);
+});
+```
+
+Ngoài ba ví dụ, test bắt buộc: người dùng chuyển sang chat B thật; đóng tab; đổi tab ID; reload extension; relay disconnect trước/sau bấm gửi; restart server khi `waiting_tab` và `unknown_sent`; upload ảnh nhân vật chậm; ảnh trả 4 bản nhưng 1 bản lỗi; video có poster nhưng thiếu MP4; URL chỉ là `blob:`; storage đầy; Vercel static thiếu backend. Unit test không đủ để khẳng định Muse thật hoạt động: sau test fixture, kiểm một phiên Chrome/MooZ Connect thật, ghi log `requestId → sentMessage → providerChatId → itemId → assetId → nodeId` và tải mở tệp từ Kho. Chỉ khi chuỗi này đủ cả ảnh, video và trường hợp tab bận mới nghiệm thu.
