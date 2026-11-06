@@ -75,7 +75,7 @@ export class ServerJobs {
     await previous.catch(() => {});
     try {
       const result = await this.execute(input, async patch => {
-        if(patch?.remote)record.remote=patch.remote;
+        if(patch?.remote)record.remote=patch.remote;if(patch?.chrome)record.chrome=patch.chrome;
         record.status = "sent";
         await this.put(record);
       });
@@ -98,7 +98,7 @@ export class ServerJobs {
     }
     return record;
   }
-  async reconcile(id,execute){if(this.active.has(id))return this.get(id);if(this.reconciles.has(id))return this.reconciles.get(id);const run=(async()=>{const record=await this.get(id);if(!record?.remote||record.status==='success'||record.status==='error')return record;const result=await execute(record.remote);if(!result.pending){record.result=result;record.status='success';delete record.error;record.updatedAt=new Date().toISOString();await this.put(record);}return record;})();this.reconciles.set(id,run);try{return await run;}finally{this.reconciles.delete(id);}}
+  async reconcile(id,execute){if(this.active.has(id))return this.get(id);if(this.reconciles.has(id))return this.reconciles.get(id);const run=(async()=>{const record=await this.get(id);if(!(record?.remote||record?.chrome)||record.status==='success'||record.status==='error')return record;const result=await execute(record.remote||record.chrome);if(!result.pending){record.result=result;record.status='success';delete record.error;record.updatedAt=new Date().toISOString();await this.put(record);}return record;})();this.reconciles.set(id,run);try{return await run;}finally{this.reconciles.delete(id);}}
 
   async diagnostics(){try{const files=(await readdir(this.directory)).filter(f=>f.endsWith('.meta.json')).slice(-200);const rows=await Promise.all(files.map(async f=>{try{return JSON.parse(await readFile(join(this.directory,f),'utf8'));}catch{return null;}}));return rows.filter(Boolean).sort((a,b)=>(b.updatedAt||b.createdAt||'').localeCompare(a.updatedAt||a.createdAt||'')).slice(0,100);}catch(error){if(error.code==='ENOENT')return[];throw error;}}
 

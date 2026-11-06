@@ -4,6 +4,15 @@ import { AIDispatch } from "../vendor/mooz/desktop/ai-dispatch.cjs";
 import sites from "../vendor/mooz/ai-sites.js";
 import protocol from "../vendor/mooz/chrome-remote-protocol.js";
 import { RelaySettings } from "./relay-settings.mjs";
+export function browserPrompt(input){
+ if(input.mediaType==='text')return input.prompt;
+ return [input.prompt,'Thông số đầu ra bắt buộc: '+(input.mediaType==='image'?'Tạo đúng 1 ảnh':'Tạo video')+'; tỷ lệ khung '+(input.size||'16:9')+'; độ phân giải mong muốn '+(input.resolution|| (input.mediaType==='image'?'1K':'720P'))+'; chất lượng '+(input.quality||'medium')+(input.duration!=null?'; thời lượng '+input.duration+' giây':'')+'. Nếu dịch vụ không hỗ trợ thông số, nói rõ giới hạn; không tự bỏ yêu cầu.'].join('\n');
+}
+export function acceptedChatURL(initial,latest,attested,provider){
+ if(latest===initial)return true;
+ if(latest!==attested||provider!=='chatgpt')return false;
+ try{const a=new URL(initial),b=new URL(latest);return a.origin===b.origin&&['https://chatgpt.com','https://chat.openai.com'].includes(a.origin)&&/^(?:\/|\/g\/[^/]+(?:\/project)?\/?)$/.test(a.pathname)&&b.pathname.startsWith(a.pathname.replace(/\/project\/?$/,'').replace(/\/$/,'')+'/c/')&&/^[a-zA-Z0-9-]+\/?$/.test(b.pathname.split('/c/')[1]||'');}catch{return false;}
+}
 export class ChromeConnection {
   constructor(directory, env = process.env, { brokerOptions = {} } = {}) {
     this.settings = new RelaySettings(directory, env);
@@ -107,6 +116,7 @@ export class ChromeConnection {
     });
     if (!check?.ok || !check.composer || check.signedIn === false)
       throw Error(check?.error || "Tab chưa đăng nhập hoặc chưa sẵn sàng.");
+    if(check.block)throw Error(check.block.message||"Dịch vụ AI yêu cầu kiểm tra trực tiếp.");
     if (check.busy)
       throw Object.assign(Error("Tab đang bận; tác vụ chưa được gửi."), {
         code: "TAB_BUSY",
@@ -124,7 +134,8 @@ export class ChromeConnection {
       requestId: input.requestId,
       provider: input.provider,
       mediaType: input.mediaType,
-      prompt: input.prompt,
+      prompt: browserPrompt(input),
+      resolution:input.resolution,quality:input.quality,background:input.background,
       referenceImages: input.referenceImages || [],
       size: input.size,
       duration: input.duration,
@@ -138,7 +149,7 @@ export class ChromeConnection {
       throw Error("Mã kết quả không khớp lượt gửi.");
     if (!result?.ok) throw Error(result?.error || "AI chưa trả kết quả.");
     const latest = await this.relay.rawRequest("tabs.get", { id: input.tabId });
-    if (latest.url !== input.chatURL)
+    if (!acceptedChatURL(input.chatURL,latest.url,result.chatURL,input.provider))
       throw Error(
         "Tab đã đổi cuộc trò chuyện. Kiểm tra kết quả thủ công; không tự gửi lại.",
       );
@@ -147,7 +158,7 @@ export class ChromeConnection {
       typeof result.text === "string" &&
       result.text.trim()
     )
-      return { kind: "text", text: result.text };
+      return { kind: "text", text: result.text,chatURL:latest.url };
     if (
       typeof result.url !== "string" ||
       !new RegExp("^data:" + input.mediaType + "/").test(result.url)
@@ -155,7 +166,17 @@ export class ChromeConnection {
       throw Error(
         "Kết quả chưa có media nhúng hợp lệ. Kiểm tra tab và tải tệp về Kho.",
       );
-    return { kind: input.mediaType, url: result.url };
+    return { kind: input.mediaType, url: result.url,chatURL:latest.url };
+  }
+  async recover(record){
+    const input={...record.chrome,provider:record.provider,mediaType:record.mediaType,requestId:record.id};
+    const result=await this.relay.rawRequest('tabs.message',{id:input.tabId,message:{type:'WORKFLOW_AI_RESULT',requestId:record.id}});
+    if(!result?.ok)return {pending:true};
+    const tab=await this.relay.rawRequest('tabs.get',{id:input.tabId});
+    if(!acceptedChatURL(input.chatURL,tab.url,result.chatURL,input.provider))throw Error('Tab đã đổi chat; không nhận nhầm kết quả.');
+    if(input.mediaType==='text'&&typeof result.text==='string')return {kind:'text',text:result.text,chatURL:tab.url};
+    if(typeof result.url!=='string'||!new RegExp('^data:'+input.mediaType+'/').test(result.url))throw Error('Kết quả chưa có tệp media hợp lệ.');
+    return {kind:input.mediaType,url:result.url,chatURL:tab.url};
   }
   async close() {
     await Promise.all([...this.testProbes].map(probe=>probe.stop()));

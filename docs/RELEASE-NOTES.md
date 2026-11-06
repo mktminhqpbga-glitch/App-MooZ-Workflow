@@ -1,3 +1,13 @@
+# 0.5.1 · Sửa gửi/nhận ChatGPT Chrome và nút mẫu
+
+- Gửi rõ tỷ lệ, độ phân giải và chất lượng đã chọn trong prompt của mọi tab AI; giữ chỉ dẫn máy ảnh/ống kính/mẫu.
+- Nhận URL chat mới chỉ khi bridge xác nhận đúng lần gửi đầu; giữ chặn đổi sang chat khác. Lưu lại binding URL sau kết quả.
+- Đọc ảnh ChatGPT trong turn chỉ có ảnh, không yêu cầu markdown/nút copy cũ. Giữ cache kết quả theo đúng request ID để đối chiếu mà không gửi lại AI.
+- Cập nhật tab có thông báo số tab; thêm kiểm tra/mở lại gửi sau lỗi và nhận kết quả lượt trước vào Canvas/Kho. Không xóa giới hạn đang chờ hay bỏ qua yêu cầu xác minh của dịch vụ.
+- Hiển thị chỉ dẫn đã áp dụng; kiểm tra toàn bộ 15 mẫu, payload và gửi lại sau lỗi trước gửi.
+- **Cần cập nhật MooZ Connect lên 1.9.3 trong Cài đặt, nạp lại extension và tải lại các tab AI đang mở.** Bản sửa bridge không thay được mã cũ đang chạy trong tab chưa tải lại.
+- Kiểm thử bridge dùng DOM ChatGPT mô phỏng với mã extension thật; chưa thay cho kiểm tra tài khoản ChatGPT đang đăng nhập của người dùng. Lượt lỗi cũ chưa được extension cũ lưu không thể tự nhận lại từ cache mới: tải ảnh đó rồi nhập vào Kho.
+
 # 0.5.0 · Thiết lập luồng, API media và Phòng dựng
 
 - Thiết lập luồng với prompt từng bước: đọc ảnh sản phẩm → kịch bản → video từng cảnh → ghép → lưu Kho → hậu kỳ. Lưu, sửa, nhân bản và áp dụng cho đầu vào mới.

@@ -220,7 +220,7 @@ async function execute(job, signal, onUpdate) {
       if (n.data.sceneIndex && !scene) throw Error('Thiếu kịch bản hợp lệ cho cảnh ' + n.data.sceneIndex + '.');
       if (imageIds.length > 8) throw Error('Mỗi lượt AI tối đa 8 ảnh tham chiếu.');
       const refs = []; let referenceBytes = 0;
-      if (sources.some(source => source.value?.assetId && !['image','text'].includes(source.value.kind)))
+      if (sources.some(source => source.value?.assetId && !['image','text'].includes(source.value.kind)&&!(job.provider==='fal'&&source.edge.targetPort==='video'&&source.value.kind==='video')))
         throw Error("Kết nối hiện tại chưa hỗ trợ video gốc làm tham chiếu; hãy dùng ảnh chụp khung hình.");
       for (const assetId of imageIds) {
         const asset =
@@ -271,6 +271,7 @@ async function execute(job, signal, onUpdate) {
       }
       signal.throwIfAborted();
       if (result.result?.kind !== mediaType) throw Error('AI trả sai loại kết quả; không chấp nhận ảnh poster thay video.');
+      if(result.result?.chatURL){job.chatURL=result.result.chatURL;job.chatTitle=result.result.chatTitle;}
       job.status = 'receiving';
       job.outputs[id] = await storeResult(job, id, result.result);
       if (n.data.sceneCount) {
@@ -392,6 +393,7 @@ export async function inspectJob(id) {
   const node = job.graph.nodes.find(item => item.id === nodeId);
   const expected = node?.type === 'generateText' || node?.type === 'transcribe' ? 'text' : node?.type === 'voiceover' || node?.type === 'audioExtract' ? 'audio' : node?.type === 'generateImage' || node?.type === 'captureLastFrame' ? 'image' : 'video';
   if (result.result?.kind !== expected) throw Error('Kết quả đối chiếu không đúng loại đầu ra của bước.');
+  if(result.result?.chatURL)job.chatURL=result.result.chatURL;
   const output = await storeResult(job, nodeId, result.result);
   job.outputs[nodeId] = output;
   if (node?.data.sceneCount) {

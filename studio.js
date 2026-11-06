@@ -1673,7 +1673,7 @@ export async function mountStudio(host, id) {
     tabs.add(new Option("Chọn tab AI…", ""));
     const connectionPanel = el("div", undefined, "inline-connection-panel");
     connectionPanel.append(popupHeading("Chọn tab AI", () => { connection.open = false; }, "Đóng chọn tab AI"), tabs, button("Cập nhật danh sách", () => refreshTabs()));
-    connection.append(tabSummary, connectionPanel);
+    const tabStatus=el("p");tabStatus.setAttribute("role","status");connectionPanel.append(tabStatus);connectionPanel.append(button("Kiểm tra và mở lại gửi",async()=>{const option=tabs.selectedOptions[0];if(!option?.value)throw Error('Chọn tab hiện tại trước.');await api('chrome/resume',{provider:provider.value,tabId:Number(option.value),chatURL:option.dataset.url});tabStatus.textContent='Tab sẵn sàng nhận lượt mới. Không gửi lại lượt cũ.';}),button("Kiểm tra kết quả lượt trước",async()=>{const prior=(await list('jobs')).filter(j=>j.projectId===project.id&&j.graph.nodes.some(n=>n.id===id)&&j.status==='unknown').sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];if(!prior)throw Error('Không có lượt chưa rõ kết quả của node này.');const recovered=await inspectJob(prior.id);const merged=mergeJobOutputs(controller.snapshot(),recovered);for(const node of merged.nodes)controller.execute({type:'updateNode',id:node.id,patch:node.data});if(recovered.chatURL){const binding=bindings.get(id);if(binding){binding.url=recovered.chatURL;updateInline(id,{tabBinding:JSON.stringify(binding)});}}await persist();render();notice('Đã nhận kết quả vào Canvas và Kho.');}));connection.append(tabSummary, connectionPanel);
     function refreshTabSummary(label = "Tab AI") {
       if (kind === "text") tabSummary.textContent = label;
       else tabSummary.replaceChildren(icon("reference"), el("span", label, "tab-binding-label"));
@@ -1706,12 +1706,13 @@ export async function mountStudio(host, id) {
     async function refreshTabs() {
       const seq = ++tabRevision,
         value = provider.value;
-      tabs.disabled = true;
+      tabs.disabled = true;tabStatus.textContent="Đang cập nhật tab…";
       try {
         const [available, jobs] = await Promise.all([api("tabs?provider=" + value), list("jobs")]);
         if (!composer.isConnected || seq !== tabRevision) return;
         tabs.replaceChildren(new Option("Chọn tab AI…", ""));
         busyTabIds = new Set(jobs.filter(job => ["preparing", "sent", "receiving"].includes(job.status)).map(job => job.tabId));
+        tabStatus.textContent="Đã cập nhật "+available.length+" tab AI.";
         for (const t of available) {
           const state = t.busy || jobs.some(job => job.tabId === t.id && ["preparing", "sent", "receiving"].includes(job.status)) ? "Đang xử lý" : "Sẵn sàng";
           const o = new Option(tabLabel(t, state), t.id);
@@ -1741,7 +1742,7 @@ export async function mountStudio(host, id) {
           : "Chưa có tab kết nối. Mở Kết nối AI ở góc trên.";
       } catch (e) {
         if (composer.isConnected && seq === tabRevision)
-          hint.textContent = e.message;
+          hint.textContent = tabStatus.textContent = e.message;
       } finally {
         if (seq === tabRevision) tabs.disabled = false;
       }
@@ -1783,6 +1784,8 @@ export async function mountStudio(host, id) {
           if (activeJobs.has(id)) await stopJob(activeJobs.get(id));
           return;
         }
+        await refreshProviders();
+        if(!provider.value)throw Error('Chọn AI đang kết nối trước khi gửi.');
         updateInline(id, {
           studioPrompt: text.value,
           provider: provider.value,
@@ -1856,6 +1859,7 @@ export async function mountStudio(host, id) {
                 if (outputs.length) render();
                 return;
               }
+              if(result.chatURL&&b&&b.provider===provider.value){b.url=result.chatURL;bindings.set(id,b);updateInline(id,{tabBinding:JSON.stringify(b)});}
               for (const [nodeId, output] of Object.entries(result.outputs))
                 if (
                   subset.nodes
@@ -1884,7 +1888,7 @@ export async function mountStudio(host, id) {
               send.textContent = "↑";
               send.setAttribute(
                 "aria-label",
-                kind === "video" ? "Tạo video" : kind === "text" ? "Tạo văn bản" : "Tạo ảnh",
+                kind === "video" ? "Gửi tạo video" : kind === "text" ? "Gửi tạo văn bản" : "Gửi tạo ảnh",
               );
             }
           }
@@ -1964,7 +1968,9 @@ export async function mountStudio(host, id) {
         }
       }
     }
-    composer.append(tools, refs, chooser, text, footer, hint);
+    composer.append(tools, refs, chooser, text);
+if(n.data.stylePrompt||n.data.cameraPrompt){const applied=el("details",undefined,"inline-applied-instructions");applied.append(el("summary","Chỉ dẫn đã áp dụng"),el("p",[n.data.stylePrompt,n.data.cameraPrompt].filter(Boolean).join("\n")));composer.append(applied);}
+    composer.append(footer,hint);
     const incoming = kind === "video"
       ? [...videoReferences().map(reference => ({ source: reference.nodeId, assetReference: reference })), ...controller.snapshot().edges.filter(edge => edge.target === id && edge.targetPort === "video" && controller.snapshot().nodes.find(node => node.id === edge.source)?.data.assetId)]
       : controller.snapshot().edges.filter(edge => edge.target === id && ["reference", "video"].includes(edge.targetPort) && controller.snapshot().nodes.find(node => node.id === edge.source)?.data.assetId);
@@ -2164,6 +2170,7 @@ export async function mountStudio(host, id) {
           notice("Đã áp dụng mẫu: " + label);
         });
         action.append(icon(glyph), el("span", label));
+        action.setAttribute("aria-pressed",String(controller.snapshot().nodes.find(node=>node.id===targetId)?.data.stylePrompt===instruction));
         action.title = instruction;
         section.append(action);
       }

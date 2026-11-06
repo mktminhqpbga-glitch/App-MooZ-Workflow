@@ -76,7 +76,7 @@ const jobs = new ServerJobs(
     assistantTab.assertJob(input);
     await chrome.check(input);
     assistantTab.assertJob(input);
-    await sent();
+    await sent({chrome:{tabId:input.tabId,chatURL:input.chatURL}});
     return chrome.generate(input);
   },
 );
@@ -258,6 +258,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, await chromeConfiguration(()=>chrome.pair()));
       if (path === "/api/chrome/resume" && req.method === "POST") {
         const input = await body(req);
+        const hold=chrome.dispatch.holds[input.provider];if(hold?.until>Date.now())throw Error('Chưa hết thời gian chờ theo hạn mức dịch vụ.');
         await chrome.check(input);
         await chrome.dispatch.resume(input.provider);
         return json(res, 200, { ok: true });
@@ -271,6 +272,7 @@ const server = createServer(async (req, res) => {
       if (path.startsWith("/api/jobs/") && req.method === "GET") {
         let record = await jobs.get(path.slice(10));
         if(record?.remote&&!jobs.active.has(record.id)&&record.status!=="success")try{record=await jobs.reconcile(record.id,remote=>reconcileMedia(remote,{env:providerSettings.env()}));}catch(error){record={...record,error:error.message};}
+        if(record?.chrome&&!jobs.active.has(record.id)&&record.status==='unknown')try{record=await jobs.reconcile(record.id,()=>chrome.recover(record));}catch(error){record={...record,error:error.message};}
         return json(
           res,
           record ? 200 : 404,
