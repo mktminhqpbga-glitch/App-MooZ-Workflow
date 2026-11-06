@@ -192,6 +192,7 @@ export async function mountStudio(host, id) {
   if (!host.isConnected) return () => {};
   if (!project) { host.textContent = "Dự án đã bị xóa."; return () => {}; }
   const previousJobs = (await list('jobs')).filter(job => job.projectId === id).sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+  if (!host.isConnected) return () => {};
   const snapshotAssets = new Map();
   for (const job of previousJobs) for (const [assetId, asset] of Object.entries(job.inputAssets || {})) snapshotAssets.set(assetId, { ...asset, id: assetId });
   const storedGraph = JSON.stringify(project.graph);
@@ -342,7 +343,7 @@ export async function mountStudio(host, id) {
   }
   addSearch.oninput = () => {
     const query = addSearch.value.trim().toLocaleLowerCase("vi");
-    for (const item of addOptions.querySelectorAll("button")) item.hidden = !item.dataset.search.includes(query);
+    for (const item of addOptions.querySelectorAll("button")) item.hidden = Boolean(item.dataset.search) && !item.dataset.search.includes(query);
   };
   addMenu.onpointerenter = event => { if (event.pointerType !== "touch") addMenu.open = true; };
   addMenu.onpointerleave = event => { if (event.pointerType !== "touch") addMenu.open = false; };
@@ -421,7 +422,7 @@ export async function mountStudio(host, id) {
   const editor = el("dialog", undefined, "cvn-resource-sheet");
   editor.setAttribute("aria-label", "Tài nguyên dự án");
   document.body.append(editor);
-  let dockAnchor = null, dockHoverId = 0, activeInlinePopup = null;
+  let dockAnchor = null, dockHoverId = 0, dockPinned = false, dockCloseTimer = null, activeInlinePopup = null;
   function positionInlinePopup() {
     if (!activeInlinePopup || !editor.open || !activeInlinePopup.anchor.isConnected) return;
     let anchor = activeInlinePopup.anchor.getBoundingClientRect();
@@ -454,13 +455,20 @@ export async function mountStudio(host, id) {
     };
   }
   editor.addEventListener("close", () => {
+    if (editor.open) return;
+    if (dockAnchor) dockAnchor.setAttribute("aria-expanded", "false");
+    dockAnchor = null; dockPinned = false;
     if (activeInlinePopup) activeInlinePopup.anchor.setAttribute("aria-expanded", "false");
     activeInlinePopup = null;
   });
   document.addEventListener("pointerdown", event => {
+    if (dockAnchor && !editor.contains(event.target) && !dockAnchor.contains(event.target)) closeDockPopup();
     if (activeInlinePopup && !editor.contains(event.target) && !activeInlinePopup.anchor.contains(event.target)) editor.close();
   }, { capture: true, signal: abort.signal });
   function closeDockPopup() {
+    clearTimeout(dockCloseTimer);
+    dockAnchor?.setAttribute("aria-expanded", "false");
+    dockPinned = false;
     dockAnchor = null;
     dockHoverId++;
     if (editor.classList.contains("dock-resource-popover")) editor.close();
@@ -474,6 +482,7 @@ export async function mountStudio(host, id) {
     editor.style.transform = "none";
     editor.style.left = Math.max(12, Math.min(anchor.left + anchor.width / 2 - editor.offsetWidth / 2, innerWidth - editor.offsetWidth - 12)) + "px";
     editor.style.top = Math.max(12, anchor.top - editor.offsetHeight - 16) + "px";
+    editor.style.visibility = "visible";
     editor.style.setProperty("--dock-tip-left", Math.max(16, Math.min(editor.offsetWidth - 16, anchor.left + anchor.width / 2 - parseFloat(editor.style.left))) + "px");
   }
   function setPointerMode(hand) {
@@ -498,38 +507,43 @@ export async function mountStudio(host, id) {
   }
   function materialTools() {
     resourcePanel("Thư viện vật liệu");
-    editor.append(
-      button("Thư viện phong cách", () => { showStyles(); requestAnimationFrame(positionDockPopup); }),
-      button("Chỉ dẫn hiệu ứng", () => { showVideoHints([...selection][0], "effect"); requestAnimationFrame(positionDockPopup); }),
-    );
+    const effects = button("Chỉ dẫn hiệu ứng", () => { showVideoHints([...selection][0], "effect"); requestAnimationFrame(positionDockPopup); });
+    effects.disabled = !controller.snapshot().nodes.some(node => selection.has(node.id) && node.type === 'generateVideo');
+    if (effects.disabled) effects.title = "Chọn một node tạo video để đặt chỉ dẫn hiệu ứng.";
+    editor.append(button("Thư viện phong cách", () => { showStyles(); requestAnimationFrame(positionDockPopup); }), effects);
   }
   for (const control of dock.querySelectorAll(":scope > button")) {
     const label = control.getAttribute("aria-label");
     if (["Kho", "Lịch sử"].includes(label)) continue;
-    const original = control.onclick;
-    const show = () => {
-      if (dockAnchor === control && editor.open) return;
-      dockAnchor = control;
+    const action = control === select ? pointerTools : label === "Phong cách" ? materialTools : label === "Công cụ" ? showImageTools : () => showHelp(label === "Phím tắt");
+    const show = (pin = false) => {
+      clearTimeout(dockCloseTimer);
+      if (dockAnchor === control && editor.open) { dockPinned ||= pin; return; }
+      dockAnchor?.setAttribute("aria-expanded", "false");
+      activeInlinePopup?.anchor.setAttribute("aria-expanded", "false"); activeInlinePopup = null;
+      dockAnchor = control; dockPinned = pin;
+      control.setAttribute("aria-expanded", "true");
       const revision = ++dockHoverId;
-      const action = control === select ? pointerTools : label === "Phong cách" ? materialTools : () => original.call(control);
+      editor.style.visibility = "hidden";
       Promise.resolve(action()).then(() => {
-        if (dockAnchor === control && revision === dockHoverId) positionDockPopup();
-        else if (editor.classList.contains("dock-resource-popover")) editor.close();
-      }).catch(error => notice(error.message));
+        if (dockAnchor === control && revision === dockHoverId) { positionDockPopup(); requestAnimationFrame(positionDockPopup); }
+      }).catch(error => { closeDockPopup(); notice(error.message); });
     };
+    control.setAttribute("aria-haspopup", "dialog"); control.setAttribute("aria-expanded", "false");
     control.classList.add("dock-hover-button");
-    control.onpointerenter = event => { if (event.pointerType !== "touch") show(); };
-    control.onclick = show;
+    control.onpointerenter = event => { if (event.pointerType !== "touch" && !dockPinned) show(); };
+    control.onclick = () => { if (dockAnchor === control && editor.open && dockPinned) closeDockPopup(); else show(true); };
   }
   setPointerMode(false);
   window.addEventListener("pointermove", event => {
-    if (!dockAnchor || !editor.open) return;
-    const button = dockAnchor.getBoundingClientRect(), panel = editor.getBoundingClientRect();
+    if (!dockAnchor || !editor.open || dockPinned) return;
+    const anchor = dockAnchor.getBoundingClientRect(), panel = editor.getBoundingClientRect();
     const inside = rect => event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    const bridge = { left: Math.min(button.left, panel.left), right: Math.max(button.right, panel.right), top: panel.bottom, bottom: button.top };
-    if (!inside(button) && !inside(panel) && !inside(bridge)) closeDockPopup();
+    const bridge = { left: Math.min(anchor.left, panel.left), right: Math.max(anchor.right, panel.right), top: panel.bottom, bottom: anchor.top };
+    clearTimeout(dockCloseTimer);
+    if (!inside(anchor) && !inside(panel) && !inside(bridge)) dockCloseTimer = setTimeout(closeDockPopup, 160);
   }, { signal: abort.signal });
-  window.addEventListener("blur", closeDockPopup, { signal: abort.signal });
+  window.addEventListener("blur", () => { if (!dockPinned) closeDockPopup(); }, { signal: abort.signal });
   function persist() {
     const graph = controller.snapshot();
     status.textContent = "Đang lưu…";
@@ -2132,6 +2146,8 @@ export async function mountStudio(host, id) {
     editor.classList.add("style-preset-sheet");
     const choices = el("div", undefined, "style-choice-grid");
     editor.append(choices);
+    const target = controller.snapshot().nodes.find(node => node.id === (targetId || [...selection][0]) && ['generateImage','generateVideo'].includes(node.type));
+    if (!target) editor.insertBefore(el('p', 'Chọn một node tạo ảnh hoặc video trên Canvas để áp dụng phong cách.'), choices);
     for (const [label, prompt] of [
       [
         "Điện ảnh",
@@ -2166,6 +2182,7 @@ export async function mountStudio(host, id) {
           notice("Đã áp dụng phong cách " + label);
         }),
       );
+    for (const choice of choices.querySelectorAll('button')) choice.disabled = !target;
   }
   function showVideoHints(id, type) {
     resourcePanel(type === "motion" ? "Chuyển động máy" : "Chỉ dẫn hiệu ứng");
@@ -2282,16 +2299,13 @@ export async function mountStudio(host, id) {
   }
   function showImageTools() {
     resourcePanel("Công cụ ảnh");
+    const target = selectedImage(), ready = target?.data.assetId && nodeTypes[target.type]?.outputs.image === 'image';
     editor.append(button("Kho tài nguyên", showAssets));
-    for (const { label, mode } of availableImageTools(connectionCapabilities))
-      editor.append(
-        button(label, async () => {
-          const n = selectedImage();
-          if (!n) throw Error("Chọn một ảnh trên canvas trước.");
-          editor.close();
-          await imageTool(n, mode);
-        }),
-      );
+    if (!ready) editor.append(el('p', 'Chọn một node có ảnh trên Canvas để chỉnh sửa, chia lưới hoặc vẽ.'));
+    for (const { label, mode } of availableImageTools(connectionCapabilities)) {
+      const control = button(label, async () => { editor.close(); await imageTool(target, mode); });
+      control.disabled = !ready; editor.append(control);
+    }
   }
   function showHelp(shortcuts = false) {
     resourcePanel(shortcuts ? "Phím tắt" : "Trợ lý sáng tạo");
@@ -2877,14 +2891,16 @@ export async function mountStudio(host, id) {
     disposed = true;
     clearTimeout(wheelSave);
     clearTimeout(inlineSave);
+    clearTimeout(dockCloseTimer);
     clearInterval(tabStatusTimer);
     if (drawFrame) cancelAnimationFrame(drawFrame);
     abort.abort();
     shell.remove();
     editor.remove();
-    for (const dialog of document.querySelectorAll(".image-workbench"))
-      dialog.close();
-    document.body.classList.remove("studio-mode");
+    if (!document.querySelector(".cvn-studio")) {
+      for (const dialog of document.querySelectorAll(".image-workbench")) dialog.close();
+      document.body.classList.remove("studio-mode");
+    }
     host.classList.remove("studio-host");
     for (const url of urls.values()) URL.revokeObjectURL(url);
     controller.execute({ type: "setViewport", viewport: pan });

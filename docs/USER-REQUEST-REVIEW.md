@@ -61,3 +61,12 @@ Danh sách này theo các yêu cầu trong cuộc trao đổi; cập nhật cùn
 - Các công cụ hậu kỳ giữ nguồn, sắp thứ tự clip, hủy xử lý; output đã đổi thông số được đánh dấu cũ.
 - App Electron x64 có backend loopback, renderer sandbox, extension ZIP kèm Cài đặt. Native macOS CI tạo ZIP/DMG và chỉ publish sau khi chạy kiểm tra gói thật. Chưa có Developer ID/notarization.
 - Tạo gói Mac trên Linux không đồng nghĩa đã chạy app trên Mac; ghi nhận kết quả riêng trong báo cáo kiểm thử.
+
+## Sửa tiếp 0.2.1 · thanh nhóm và chớp dashboard
+
+- Bấm nhóm giữ popup mở; bấm lại/ngoài/Đóng mới đóng. Rê chuột xem nhanh có 160 ms chờ khi rời vùng. Không gọi lại wrapper vô hiệu hóa nút khi mở bằng hover.
+- Chặn mount Canvas đã hết hạn sau khi đọc jobs. Cleanup chỉ gỡ studio-mode/đóng editor ảnh toàn cục khi không còn Canvas khác; dashboard bị ẩn hoàn toàn khi có Canvas.
+- Bảng tài nguyên có lớp hiển thị riêng trên Canvas, gồm cả trợ lý mở bằng quả cầu. Không để Canvas chặn thao tác nhập liệu.
+- Công cụ ảnh và chỉ dẫn hiệu ứng có điều kiện chọn node rõ ràng. Sửa tìm loại node để nút Đóng không bị lỗi khi không có dataset tìm kiếm.
+- Thêm tests/dock-checks.cjs: kiểm tra hành động trong từng nhóm, popup pinned, blank click giữ shell/viewport/route, giữ editor ảnh qua cleanup trễ. Chạy sáng/tối trên trình duyệt và chạy trong app đóng gói trên workflow Mac.
+- Không tái hiện được việc đổi route về home bằng click vùng trống trong bản trình duyệt cũ; test mới tái tạo và ngăn lỗi cleanup của editor cũ gỡ chế độ của Canvas đang sống. Chưa coi kiểm thử DOM là bằng chứng đã thử mọi GPU của máy khách.

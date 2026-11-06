@@ -3247,3 +3247,9 @@ main { max-width: none; margin: 0; padding: 24px 20px; }
 .node-local-config{position:absolute;top:8px;right:8px;z-index:2;padding:6px 9px;background:var(--raised);border:1px solid var(--line);border-radius:7px;font-size:11px;}
 .batch-extension-field{display:none;grid-column:1/-1;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:12px;}.batch-extension-mode .batch-extension-field{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;}.batch-extension-field p{grid-column:1/-1;color:var(--muted);}.batch-extension-field input,.batch-extension-field select{min-width:0;padding:8px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;}
 .cvn-node-title,.middle-panning{user-select:none;}
+
+/* The dashboard never paints behind an active Canvas or a nonmodal tool sheet. */
+body.studio-mode > .workspace, body:has(> .cvn-studio) > .workspace,
+body:has(> .cvn-studio) > .sidebar { display: none; }
+.cvn-studio { isolation: isolate; z-index: 21; }
+.cvn-resource-sheet[open] { z-index: 90; }

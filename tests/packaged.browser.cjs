@@ -24,7 +24,8 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
  const processed=await page.evaluate(async data=>{const{processMedia}=await import('./core/local-media.js');const{toDataURL}=await import('./core/storage.js');const blob=await(await fetch(data)).blob();const result=await processMedia('videoTrim',{videos:[{blob,name:'fixture.mp4',kind:'video'}],settings:{trimStart:.2,trimEnd:.8}});return toDataURL(result.blob);},'data:video/mp4;base64,'+(await readFile(fixture)).toString('base64'));
  await writeFile(output,Buffer.from(processed.split(',')[1],'base64'));
  const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_format','-of','json',output],{encoding:'utf8'}));assert.ok(+probe.format.duration>=.5&&+probe.format.duration<.8,'packaged WASM processes actual MP4');
+ await require('./dock-checks.cjs').checkDock(page);
  assert.deepEqual(errors,[]);
- console.log('PASS packaged Electron application: embedded secured server, sandboxed renderer, Settings downloads ZIP, single fluid workspace, post-production route and actual bundled WASM MP4 processing.');
+ console.log('PASS packaged Electron application: embedded secured server, sandboxed renderer, Settings downloads ZIP, single fluid workspace, post-production route and actual bundled WASM MP4 processing, every dock group and stable Canvas cleanup.');
  }finally{await application?.close();await rm(profile,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -1,3 +1,10 @@
+MooZ CVN 0.2.1 · sửa nhóm công cụ và ổn định Canvas.
+
+- Click nhóm công cụ giữ bảng mở; click ngoài hoặc nút Đóng mới đóng. Hover vẫn xem nhanh, có khoảng chờ khi rời bảng.
+- Không bật lại dashboard khi một Canvas cũ hoàn tất dọn dẹp sau màn hình mới; chặn mount đã hết hạn và ẩn dashboard dưới Canvas.
+- Công cụ cần chọn ảnh/video hiển thị hướng dẫn và vô hiệu hóa đúng điều kiện; tìm loại node không làm hỏng nút Đóng.
+- Kiểm tra riêng từng nhóm nút, cả theme sáng/tối, và kiểm tra lại trên app đã đóng gói.
+
 MooZ CVN cho macOS Intel (x64), kèm MooZ Connect trong Cài đặt.
 
 - Một khu làm việc rộng, ảnh sản phẩm và ảnh nhân vật tùy chọn.
