@@ -1,3 +1,9 @@
+# 0.4.1 · Làm mới giao diện Phòng dựng
+
+- Khung xem, timeline và thông số chia thành các thẻ gọn; nhóm màu/âm thanh riêng.
+- Tiêu đề và thanh bước rõ ràng, nền sáng/tối, nút xuất nổi bật; Đóng góc trên phải và thanh thao tác giữ trong tầm nhìn khi cuộn.
+- Điều chỉnh giao diện và cách nhóm trường, giữ nguyên renderer và luồng xử lý media của 0.4.0.
+
 # 0.4.0 · Phòng dựng và rà soát toàn app
 
 - Hai timeline độc lập cho video/nhạc; waveform giải mã thật, kéo đoạn/hai mép và nhập giây.
