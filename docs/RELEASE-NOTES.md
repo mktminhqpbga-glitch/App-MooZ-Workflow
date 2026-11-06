@@ -1,3 +1,10 @@
+MooZ CVN 0.3.0 · relay máy ảo, video depth local và bố cục gọn.
+
+- Cài đặt có chọn local/relay, địa chỉ WSS, khóa quản trị, lưu/kiểm tra/tạo mã ghép/xóa cấu hình. Khóa giữ phía máy chủ, không hiển thị lại; không đổi kết nối trong lúc có request chạy.
+- Video đã tải lên có nút Tạo video chiều sâu. MiDaS Small chạy local bằng WASM, xuất MP4 xám, có tiến trình/hủy/chọn đoạn/FPS/giữ âm thanh. Đây là độ sâu tương đối từng khung, không phải khoảng cách mét.
+- Bốn mục Ảnh sản phẩm – Luồng mẫu – AI – Tab ở một hàng, nút cập nhật tab thu gọn.
+- Composer của node đang chọn nổi trên các node lân cận; ô văn bản sáng/tối có nền đúng.
+
 MooZ CVN 0.2.1 · sửa nhóm công cụ và ổn định Canvas.
 
 - Click nhóm công cụ giữ bảng mở; click ngoài hoặc nút Đóng mới đóng. Hover vẫn xem nhanh, có khoảng chờ khi rời bảng.

@@ -1,3 +1,4 @@
+import { openDepthWorkbench } from "./depth-workbench.js";
 import { mergeJobOutputs, isStale } from "./core/output-state.js";
 import { openPostWorkbench } from "./post-workbench.js";
 import { mountAssistantChat } from "./assistant-ui.js";
@@ -1291,7 +1292,12 @@ export async function mountStudio(host, id) {
       fullscreen.title = "Xem video toàn màn hình";
       fullscreen.setAttribute("aria-label", "Xem video toàn màn hình");
       const post = button("Hậu kỳ", async () => { const asset = await readAsset(n.data.assetId); return openPostWorkbench(asset, { onResult: asset => addAssetNode(asset) }); });
-      post.disabled = !video; context.append(post, capture);
+      const depth = button("Tạo video chiều sâu", async () => {
+        const asset = await readAsset(n.data.assetId);
+        return openDepthWorkbench(asset, { projectId: project.id, signal: abort.signal, onResult: output => { if (!disposed) return addAssetNode(output); } });
+      });
+      depth.disabled = !video; depth.prepend(icon("layers"));
+      post.disabled = !video; context.append(post, depth, capture);
       trailingAction = fullscreen;
     } else {
       const primary = el("div", undefined, "image-primary-tools"),
@@ -1493,7 +1499,7 @@ export async function mountStudio(host, id) {
     text.placeholder =
       kind === "video"
         ? "Mô tả chuyển động, cảnh quay và nội dung video…"
-        : "Nhập mô tả để tạo ảnh, hoặc tải ảnh lên và viết yêu cầu chỉnh sửa, ví dụ: đổi nền thành đêm tuyết…";
+        : kind === "text" ? "Nhập yêu cầu viết văn bản hoặc kịch bản…" : "Nhập mô tả để tạo ảnh, hoặc tải ảnh lên và viết yêu cầu chỉnh sửa, ví dụ: đổi nền thành đêm tuyết…";
     text.setAttribute("aria-label", "Nội dung yêu cầu");
     text.maxLength = 50000;
     if (kind !== "video") text.oninput = () => updateInline(id, { studioPrompt: text.value });
@@ -1854,7 +1860,7 @@ export async function mountStudio(host, id) {
               send.textContent = "↑";
               send.setAttribute(
                 "aria-label",
-                kind === "video" ? "Tạo video" : "Tạo ảnh",
+                kind === "video" ? "Tạo video" : kind === "text" ? "Tạo văn bản" : "Tạo ảnh",
               );
             }
           }

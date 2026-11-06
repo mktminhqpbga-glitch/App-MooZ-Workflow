@@ -21,11 +21,13 @@
     "ffmpeg/ffmpeg-core.js": "b266ab5b952555881dd6310663986994a182acb2b7ff25cf10a25f7a37ac2b21",
     "ffmpeg/ffmpeg-core.wasm": "9f57947a5bd530d8f00c5b3f2cb2a3492faa7e5d823315342d6a8656d0a6b7b7",
     "fonts/DejaVuSans.ttf": "57f73e11f51999432bf7ab22ce55b6f945d5eca1bf824404cfa9ec2e3718c84e",
-    "fonts/LICENSE-DejaVu.txt": "63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9"
+    "fonts/LICENSE-DejaVu.txt": "63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9",
+    "relay-server.cjs": "f3d99ea759a1717f841a218e035f8f97de3afa82135a72b00516eb29d94920f9"
   },
   "adaptations": [
     "canvas-image-editor.js: output adapter renamed to MooZCVNMediaEditorTarget",
-    "media-studio.js: extension URLs adapted to same-origin web assets; direct credential speech helpers not exposed; speech goes through server."
+    "media-studio.js: extension URLs adapted to same-origin web assets; direct credential speech helpers not exposed; speech goes through server.",
+    "relay-server.cjs: upstream relay-server/server.cjs copied unchanged for compatible deployment and real TLS/WSS integration tests."
   ],
   "additional_source_commit": "09d54eb8f0211679a4ea483c16f26b123cd23050"
 }

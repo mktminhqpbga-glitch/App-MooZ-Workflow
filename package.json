@@ -1,6 +1,6 @@
 {
   "name": "mooz-cvn",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,12 +10,12 @@
     "test:review": "node tests/canvas-review.browser.cjs",
     "test:browser": "node tests/projects.browser.cjs && node tests/workspace.browser.cjs && node tests/media.browser.cjs && node tests/inline.browser.cjs && node tests/image-tools.browser.cjs",
     "start:desktop": "electron .",
-    "package:mac": "electron-builder --mac --x64 --publish never",
-    "package:mac:zip": "electron-builder --mac zip --x64 --publish never",
-    "package:linux:test": "electron-builder --linux dir --publish never",
+    "package:mac": "node scripts/prepare-depth.mjs && electron-builder --mac --x64 --publish never",
+    "package:mac:zip": "node scripts/prepare-depth.mjs && electron-builder --mac zip --x64 --publish never",
+    "package:linux:test": "node scripts/prepare-depth.mjs && electron-builder --linux dir --publish never",
     "test:local-media": "node tests/local-media.browser.cjs",
     "test:packaged": "node tests/packaged.browser.cjs",
-    "test:all": "npm test && npm run test:browser && node tests/dock.browser.cjs && node tests/canvas-review.browser.cjs && node tests/queue-flow.browser.cjs && node tests/local-media.browser.cjs"
+    "test:all": "npm test && npm run test:browser && node tests/dock.browser.cjs && node tests/relay-settings.browser.cjs && node tests/depth-video.browser.cjs && node tests/canvas-review.browser.cjs && node tests/queue-flow.browser.cjs && node tests/local-media.browser.cjs"
   },
   "engines": {
     "node": ">=22"
@@ -23,6 +23,7 @@
   "devDependencies": {
     "electron": "^45.0.0",
     "electron-builder": "^26.15.3",
+    "onnxruntime-web": "1.22.0",
     "playwright": "1.58.2"
   },
   "dependencies": {

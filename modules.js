@@ -1,3 +1,4 @@
+import { mountRelaySettings } from "./relay-settings-ui.js";
 import { mountAssistantSettings } from "./assistant-ui.js";
 import { icon } from "./icons.js";
 import {
@@ -314,6 +315,7 @@ export async function mountSettings(host) {
   void fetch('/downloads/release.json').then(response=>{if(!response.ok)throw Error('Không đọc được phiên bản');return response.json();}).then(info=>{extension.textContent='Tải MooZ Connect '+info.extensionVersion;releaseState.textContent='Mã nguồn app '+info.appVersion+' · bản Mac công khai xem trên trang phát hành.';}).catch(()=>{releaseState.textContent='Mở trang phát hành để xem gói Mac hiện có.';});
   void fetch('https://api.github.com/repos/mktminhqpbga-glitch/App-MooZ-Workflow/releases/latest').then(response=>{if(!response.ok)throw Error('Chưa có release');return response.json();}).then(release=>{const asset=release.assets?.find(asset=>asset.name==='MooZ-CVN-macOS-Intel.zip');if(asset&&asset.browser_download_url.startsWith('https://github.com/')){mac.href=asset.browser_download_url;mac.textContent='Tải macOS Intel · '+release.tag_name;releaseState.textContent='Bản phát hành: '+release.tag_name;}}).catch(()=>{});
 
+  const cleanupRelay = mountRelaySettings(host, {onChanged: () => { code.value="";code.hidden=true;return refresh(); }});
   const panel = el("section", undefined, "settings-panel"),
     status = el("p", "Đang kiểm tra máy chủ…"),
     code = el("textarea");
@@ -445,6 +447,7 @@ export async function mountSettings(host) {
   }
   await refresh();
   return () => {
+    cleanupRelay();
     code.value = "";
   };
 }
@@ -706,6 +709,15 @@ export async function mountBatch(host, kind) {
     provider.onchange = () => void refresh();
     const submit = el("button", "Thêm & tạo node");
     submit.type = "submit";
+    const refreshTabButton = button("↻", async () => {
+        const selected = provider.value;
+        availableProviders = await connectedAI(kind, { force: true });
+        provider.replaceChildren(new Option(availableProviders.length ? 'Chọn AI…' : 'Chưa có AI kết nối',''));
+        for (const item of availableProviders) provider.add(new Option(item.name,item.id));
+        provider.value = availableProviders.some(item=>item.id===selected) ? selected : '';
+        await refresh();
+      });
+    refreshTabButton.setAttribute("aria-label", "Cập nhật tab"); refreshTabButton.title="Cập nhật tab";
     form.append(
       el("h2", "Luồng làm việc"),
       prompts,
@@ -713,14 +725,6 @@ export async function mountBatch(host, kind) {
       template,
       provider,
       tabs,
-      button("Cập nhật tab", async () => {
-        const selected = provider.value;
-        availableProviders = await connectedAI(kind, { force: true });
-        provider.replaceChildren(new Option(availableProviders.length ? 'Chọn AI…' : 'Chưa có AI kết nối',''));
-        for (const item of availableProviders) provider.add(new Option(item.name,item.id));
-        provider.value = availableProviders.some(item=>item.id===selected) ? selected : '';
-        await refresh();
-      }),
       ratio,
       duration,
       splitMode,
@@ -747,6 +751,11 @@ export async function mountBatch(host, kind) {
       if (control === source) field.classList.add("batch-source-field");
       field.hidden = [duration, sceneCount, makeImages].includes(control) && kind !== "video";
     }
+    const connectionRow = el('div', undefined, 'batch-connection-row');
+    connectionRow.setAttribute('aria-label','Ảnh, luồng mẫu, AI và tab');
+    promptCount.after(connectionRow);
+    for (const control of [source,template,provider,tabs]) connectionRow.append(control.closest('.batch-field'));
+    const tabControls=el('div',undefined,'batch-tab-controls');tabs.before(tabControls);tabControls.append(tabs,refreshTabButton);
     form.onsubmit = async event => {
       event.preventDefault(); submit.disabled = true;
       const selected = { modeType:flowMode, extensionVideo:extensionVideo.value, targetDuration:Number(targetDuration.value), text: prompts.value, mode: splitMode.value, copies: kind === 'image' ? generation.count : 1, assets: [...assets], sourceId: source.value, characterIds: [...characterIds], provider: provider.value, tabId: tabs.value && tabs.value !== 'auto' ? Number(tabs.value) : null, autoTab: tabs.value === 'auto', chatURL: tabs.selectedOptions[0]?.dataset.url || null, kind, ratio: ratio.value, duration: duration.value === '' ? null : Number(duration.value), generation: { ...generation }, scenes: Number(sceneCount.value), createImages: makeImages.checked, negative: negative.value, template: template.value };

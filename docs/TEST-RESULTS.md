@@ -1,3 +1,16 @@
+# Kiểm tra bổ sung 0.3.0
+
+Đã chạy thành công toàn bộ `npm run test:all` và `npm run test:packaged` trên Linux/Chromium/Electron đóng gói. Kiểm tra bổ sung:
+
+- Relay Settings lưu/đọc lại, không trả khóa về giao diện, quyền file 0600, chặn thay cấu hình khi có job. Broker HTTPS/WSS thật với CA thử nghiệm tin cậy: sai khóa bị từ chối, ghép companion mã hóa và RPC tabs chạy, chuyển local thu hồi room.
+- Video chiều sâu chạy model MiDaS ONNX thật trong WASM, hủy khi model/worker đã bắt đầu không sinh kết quả, MP4 H264 xám có âm thanh/đúng thời lượng, giữ nguyên nguồn, tải về và thêm Canvas. Không gọi dịch vụ AI bên ngoài.
+- Bốn bộ chọn batch cùng hàng khi sidebar thay đổi. Ô nhập kịch bản nằm trên video chồng lấn: elementFromPoint, click/gõ thật, giữ nội dung khi đổi node, không đổi viewport hoặc dựng lại shell; nền sáng đúng theme.
+- Bản Electron đóng gói dùng model/FFmpeg đi kèm; ffprobe xác nhận video đầu ra.
+
+Kiểm tra Mac native và phát hành chỉ được coi hoàn tất khi workflow `release-mac.yml` của commit tương ứng thành công. Đây không phải kiểm thử tài khoản AI thật hoặc Chrome trên máy ảo thật của người dùng; chúng chưa được cung cấp. Relay vẫn cần dịch vụ do người dùng triển khai/cung cấp.
+
+---
+
 # Kết quả kiểm tra bản 0.2.0
 
 Môi trường thực thi: Linux, Node 24, Chromium/Playwright và FFmpeg/ffprobe. Không gửi lượt AI trả phí; provider/tab được fixture ở các bài tích hợp. Media MP4/PNG/MP3 được tạo, giải mã và xử lý thật.

@@ -9,6 +9,7 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
  application=await electron.launch({executablePath,args:process.platform==='linux'?['--no-sandbox','--ozone-platform=headless','--disable-gpu']:[],env:{...process.env,MOOZ_DESKTOP_PROFILE:profile,MOOZ_DESKTOP_PORT:'17474'},timeout:45000});
  const page=await application.firstWindow();await page.waitForURL('http://127.0.0.1:17474/**');await page.locator('#main').waitFor();
  assert.equal(await page.evaluate(()=>!!window.moozDesktop?.accessCode),true);
+ assert.equal(await page.evaluate(()=>window.moozDesktop.version),require('../package.json').version);
  const status=await page.evaluate(async()=>{const {api}=await import('./client-api.js');return api('status');});assert.ok(status.chrome);
  await page.goto('http://127.0.0.1:17474/#settings');await page.getByText('Ứng dụng & extension',{exact:true}).waitFor();
  const saved=path.join(profile,'MooZ-Connect.zip');
@@ -25,7 +26,13 @@ const path = require('node:path'), os = require('node:os'), assert = require('no
  await writeFile(output,Buffer.from(processed.split(',')[1],'base64'));
  const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_format','-of','json',output],{encoding:'utf8'}));assert.ok(+probe.format.duration>=.5&&+probe.format.duration<.8,'packaged WASM processes actual MP4');
  await require('./dock-checks.cjs').checkDock(page);
+ await require('./composer-overlap-checks.cjs').checkComposerOverlap(page);
+ await require('./relay-settings-checks.cjs').checkRelaySettings(page);
+ await require('./relay-settings-checks.cjs').checkRelayBusyGuard(page);
+ const depthOutput=await require('./depth-video-checks.cjs').checkDepthVideo(page,'data:video/mp4;base64,'+(await readFile(fixture)).toString('base64'),{download:false});
+ const depthFile=path.join(profile,'depth.mp4');await writeFile(depthFile,Buffer.from(depthOutput.data.split(',')[1],'base64'));
+ const depthProbe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-show_format','-of','json',depthFile],{encoding:'utf8'}));assert.equal(depthProbe.streams.find(stream=>stream.codec_type==='video').codec_name,'h264');assert.ok(Math.abs(+depthProbe.format.duration-1)<.08);
  assert.deepEqual(errors,[]);
- console.log('PASS packaged Electron application: embedded secured server, sandboxed renderer, Settings downloads ZIP, single fluid workspace, post-production route and actual bundled WASM MP4 processing, every dock group and stable Canvas cleanup.');
+ console.log('PASS packaged Electron application: embedded secured server, sandboxed renderer, Settings downloads ZIP, single fluid workspace, post-production route and actual bundled WASM MP4 processing, every dock group, stable Canvas cleanup/composer stacking, private relay Settings with busy-job guard, and real bundled MiDaS depth MP4.');
  }finally{await application?.close();await rm(profile,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

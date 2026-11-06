@@ -1,0 +1,15 @@
+{
+  "model": "MiDaS v2.1 Small 256 ONNX",
+  "model_url": "https://github.com/isl-org/MiDaS/releases/download/v2_1/model-small.onnx",
+  "model_sha256": "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58",
+  "license": "MIT",
+  "inference_reference": "https://github.com/isl-org/MiDaS/blob/master/tf/run_onnx.py",
+  "preprocessing": "RGB 0..1, NCHW 1x3x256x256; exported model performs normalization internally.",
+  "runtime": "onnxruntime-web 1.22.0, WASM CPU one thread",
+  "runtime_license": "MIT",
+  "files": {
+    "ort.wasm.bundle.min.mjs": "e53392ea5f0e654acf1866c16564b340661ed5d238f692c3c2bd40b940f924a2",
+    "ort-wasm-simd-threaded.mjs": "30dd851d9c00622940500f71ddd2ff8820c5cb65270816080175b958705385a8",
+    "ort-wasm-simd-threaded.wasm": "71aef04959c5c1b6de461b6538e2058e306610034a85aad2742d0c7fd4533fe4"
+  }
+}

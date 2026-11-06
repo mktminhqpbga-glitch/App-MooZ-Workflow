@@ -1,3 +1,4 @@
+import './scripts/prepare-depth.mjs';
 import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 await mkdir("dist", { recursive: true });
@@ -15,6 +16,17 @@ const files = [
   "canvas-libraries.js",
   "assistant-ui.js",
   "modules.js",
+  "relay-settings-ui.js",
+  "depth-worker.js",
+  "depth-workbench.js",
+  "core/depth-video.js",
+  "vendor/depth/model-small.onnx",
+  "vendor/depth/ort.wasm.bundle.min.mjs",
+  "vendor/depth/ort-wasm-simd-threaded.mjs",
+  "vendor/depth/ort-wasm-simd-threaded.wasm",
+  "vendor/depth/LICENSE-MiDaS.txt",
+  "vendor/depth/LICENSE-ONNX-Runtime.txt",
+  "vendor/depth/ThirdPartyNotices-ONNX-Runtime.txt",
   "client-api.js",
   "core/storage.js",
   "core/runner.js",

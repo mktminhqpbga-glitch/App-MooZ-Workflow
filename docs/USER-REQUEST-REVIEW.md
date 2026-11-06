@@ -2,6 +2,15 @@
 
 Danh sách này theo các yêu cầu trong cuộc trao đổi; cập nhật cùng mã nguồn, không coi ảnh giao diện hay nút bị vô hiệu hóa là chức năng hoàn chỉnh.
 
+## Bổ sung 0.3.0
+
+| Yêu cầu | Thực hiện | Kiểm tra |
+| --- | --- | --- |
+| Điền URL/khóa relay trong Cài đặt | Local/relay, lưu/test/tạo mã/xóa; khóa giữ phía server | HTTPS/WSS thật + UI trên server thật + app đóng gói |
+| Video tải lên có nút tạo bản đồ chiều sâu | MiDaS CPU cục bộ, video xám MP4, hủy/tải/thêm Canvas | ONNX thật, FFmpeg thật, ffprobe; không phải bộ lọc xám |
+| Bốn mục chọn batch một hàng | Cùng hàng, cuộn ngang trên màn hẹp, nút cập nhật tab gọn | Bố cục và sidebar trên trình duyệt |
+| Ô nhập kịch bản bị video che | Node chọn có lớp cao hơn, sửa nền editor sáng | Click/gõ đúng vùng giao nhau, đổi node giữ nội dung/zoom |
+
 ## Canvas
 
 | Yêu cầu | Kết quả hiện tại | Kiểm tra |

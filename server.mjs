@@ -20,6 +20,13 @@ const chrome = new ChromeConnection(runtime);
 await chrome.init();
 const assistantTab = new AssistantTab(runtime);
 await assistantTab.init();
+let chromeConfigBusy = false;
+const chromeConfiguration = async action => {
+  if(chromeConfigBusy)throw Error('Đang xử lý cấu hình Chrome; đợi thao tác hiện tại kết thúc.');
+  if(jobs.active.size)throw Error('Chờ các yêu cầu đang chạy kết thúc trước khi đổi hoặc kiểm tra kết nối Chrome.');
+  chromeConfigBusy=true;
+  try{return await action();}finally{chromeConfigBusy=false;}
+};
 const jobs = new ServerJobs(
   resolve(runtime, "requests"),
   async (input, sent) => {
@@ -59,6 +66,7 @@ const jobs = new ServerJobs(
       !Number.isSafeInteger(input.tabId)
     )
       throw Error("Chọn AI và tab đã kết nối.");
+    if(chromeConfigBusy)throw Error("Kết nối Chrome đang được cấu hình; chưa gửi AI.");
     assistantTab.assertJob(input);
     await chrome.check(input);
     assistantTab.assertJob(input);
@@ -91,6 +99,14 @@ const staticFiles = new Set([
   "image-workbench.js",
   "icons.js",
   "post-workbench.js",
+  "relay-settings-ui.js",
+  "depth-worker.js",
+  "depth-workbench.js",
+  "core/depth-video.js",
+  "vendor/depth/model-small.onnx",
+  "vendor/depth/ort.wasm.bundle.min.mjs",
+  "vendor/depth/ort-wasm-simd-threaded.mjs",
+  "vendor/depth/ort-wasm-simd-threaded.wasm",
   "downloads/release.json",
   "core/queue-plan.js",
   "core/output-state.js",
@@ -193,8 +209,15 @@ const server = createServer(async (req, res) => {
         if (!actual) throw Error("Tab trợ lý không còn kết nối. Kiểm tra lại trong Cài đặt.");
         return json(res, 200, await jobs.run({ requestId: input.requestId, prompt: input.prompt, purpose: "assistant", mediaType: "text", provider: selected.provider, tabId: selected.tabId, chatURL: actual.url }));
       }
+      if(path === '/api/chrome/config' && req.method === 'GET')return json(res,200,chrome.settings.snapshot());
+      if(path === '/api/chrome/config' && req.method === 'POST') {
+        const input=await body(req);return json(res,200,await chromeConfiguration(()=>chrome.configure(input)));
+      }
+      if(path === '/api/chrome/test-relay' && req.method === 'POST') {
+        const input=await body(req);return json(res,200,await chromeConfiguration(()=>chrome.testRelay(input)));
+      }
       if (path === "/api/chrome/pair" && req.method === "POST")
-        return json(res, 200, await chrome.pair());
+        return json(res, 200, await chromeConfiguration(()=>chrome.pair()));
       if (path === "/api/chrome/resume" && req.method === "POST") {
         const input = await body(req);
         await chrome.check(input);
@@ -202,9 +225,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (path === "/api/chrome/disconnect" && req.method === "POST") {
-        chrome.relay.revokeLocal();
-        chrome.relay.revokeRemote();
-        await chrome.broker.stop();
+        await chromeConfiguration(()=>chrome.disconnect());
         return json(res, 200, { ok: true });
       }
       if (path === "/api/jobs" && req.method === "POST")
@@ -235,11 +256,13 @@ const server = createServer(async (req, res) => {
     const file = path === "/" ? "index.html" : path.slice(1);
     if (!staticFiles.has(file)) return json(res, 404, { error: "Not found" });
     const data = await readFile(resolve(root, file));
+    const binary = [".wasm", ".onnx", ".ttf"].includes(extname(file));
     res.writeHead(200, {
       "Content-Type":
-        { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".wasm": "application/wasm", ".ttf": "font/ttf", ".json": "application/json" }[
+        { ".html": "text/html", ".css": "text/css", ".js": "text/javascript",
+      ".mjs": "text/javascript", ".onnx": "application/octet-stream", ".wasm": "application/wasm", ".ttf": "font/ttf", ".json": "application/json" }[
           extname(file)
-        ] + "; charset=utf-8",
+        ] + (binary ? "" : "; charset=utf-8"),
       "Cache-Control": "no-store",
     });
     res.end(data);

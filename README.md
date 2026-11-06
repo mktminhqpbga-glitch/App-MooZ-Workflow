@@ -49,3 +49,9 @@ GitHub Actions `.github/workflows/release-mac.yml` chạy toàn bộ kiểm th�
 Batch có một khu làm việc, ảnh sản phẩm/nhân vật tùy chọn và queue riêng. `Thêm & tạo node` chỉ chốt kế hoạch; `Chạy hàng đợi` mới gửi AI. Job đang gửi khi gián đoạn cần đối chiếu, không tự gửi lại. Hậu kỳ thông thường xử lý local bằng WASM; TTS/Whisper cần OpenAI key phía máy chủ và có thông báo gửi dữ liệu.
 
 Thông báo media/font bổ sung ở `vendor/mooz/THIRD-PARTY-NOTICES.md`. Đối chiếu phạm vi còn chưa xác thực ở `docs/USER-REQUEST-REVIEW.md`.
+
+## Cấu hình Chrome máy ảo và video chiều sâu
+
+Bản 0.3.0 có mục **Kết nối Chrome máy ảo** trong Cài đặt: chọn chế độ, nhập WSS/key, kiểm tra, lưu và tạo mã. Dịch vụ relay phải được triển khai riêng; xem `docs/RELAY-SETUP.md`.
+
+Thanh công cụ video có **Tạo video chiều sâu**: model MiDaS Small suy luận local, giữ nguồn và xuất MP4 xám. Model/runtime chuẩn bị khi build hoặc package, có kiểm SHA256, không cần Python trên máy người dùng. Xem `docs/DEPTH-VIDEO.md` và `vendor/depth/SOURCE.json`; giữ các giấy phép MIT đi kèm.
