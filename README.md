@@ -50,6 +50,8 @@ Batch có một khu làm việc, ảnh sản phẩm/nhân vật tùy chọn và 
 
 **Bàn giao sửa AI cho đối tác:** [Giao thức gửi–nhận, giữ tab, xếp hàng khi bận và lưu đủ kết quả](docs/RELIABLE-AI-TAB-QUEUE-RESULT-HANDOFF.md). Tài liệu chỉ rõ các điểm đang gây lỗi trong mã hiện tại, contract cần sửa và bảng nghiệm thu; không thay thế việc kiểm thử với tài khoản AI thật.
 
+**Bàn giao tạo video hàng loạt:** [Luồng đầy đủ từ nhiều ảnh sản phẩm/nhân vật, gộp–tách ảnh và `@anhN` đến MP4](docs/BATCH-VIDEO-END-TO-END-HANDOFF.md). Tài liệu có schema job, quy tắc kéo ảnh vào prompt, sơ đồ, mã mẫu planner và bảng nghiệm thu cho đối tác.
+
 Thông báo media/font bổ sung ở `vendor/mooz/THIRD-PARTY-NOTICES.md`. Đối chiếu phạm vi còn chưa xác thực ở `docs/USER-REQUEST-REVIEW.md`.
 
 ## Cấu hình Chrome máy ảo và video chiều sâu
