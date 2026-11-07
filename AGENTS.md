@@ -26,6 +26,7 @@ Keep this block so `oc init` can refresh the instructions.
 
 # Current product direction and quick context
 
+- Latest UI correction (07/11/2026): the user rejected the generic SwiftUI workspace shipped in the first native test build. Their explicit visual/workflow reference is **LiBTv AI**. Research the actual product/editor before changing UI; do not substitute a generic form, infer its design from Liblib's image gallery, or treat the first build's screenshots as approved design. Keep the native macOS requirement and durable queue/media fixes. Passing CI is functional evidence, not visual acceptance.
 - User confirmed macOS first, native Swift app with SwiftUI/AppKit. HTML/CSS/JavaScript, Electron and WebView are not the runtime/UI for the new app.
 - A separate Chrome companion extension may remain JavaScript; the user explicitly chose to keep it.
 - Native source now lives in `native/`: SPM MooZCore and MooZApp, SwiftUI/AppKit UI, SQLite/file store, API/Chrome queue, FFmpeg pipeline and tests. The legacy 0.5.1 baseline `5bd7dea` is retained for migration reference, not the new runtime.
