@@ -74,7 +74,7 @@
       </div>
       <div class="batchWork">
         <div class="queueHeading"><h3>Tiến trình hàng đợi</h3><p>{{ visibleBatches.length }} đợt · {{ visibleBatches.reduce((total, batch) => total + batch.jobs.length, 0) }} tác vụ</p><el-space wrap><el-button :disabled="!visibleBatches.some(batch => !batch.running && batch.jobs.some(job => job.state !== 'succeeded')) || !!controlId" @click="controlAll(true)">Chạy tất cả</el-button><el-button :disabled="!visibleBatches.some(batch => batch.running) || !!controlId" @click="controlAll(false)">Tạm dừng tất cả</el-button></el-space></div>
-        <el-alert v-if="error" :title="error" type="error" :closable="false" showIcon />
+        <el-alert v-if="error || refreshError" :title="error || refreshError" type="error" :closable="false" showIcon />
 
         <el-card v-for="batch in visibleBatches" :key="batch.id" class="queueCard" shadow="never">
           <template #header><div class="cardHeading"><div><strong>{{ batch.name }}</strong><small>{{ completed(batch) }}/{{ batch.jobs.length }} {{ mediaType === 'image' ? 'tác vụ ảnh' : 'video' }} · {{ batch.input.providerId }} / {{ batch.input.modelId }}</small></div><el-button :loading="controlId === batch.id" @click="control(batch)">{{ batch.running ? 'Dừng sau lượt hiện tại' : 'Chạy / tiếp tục' }}</el-button></div></template>
@@ -130,6 +130,7 @@ const otherValues = computed({ get: () => input.other ?? {}, set: value => { inp
 const chromeBinding = computed(() => (settings.value.mediaProviderConfigs as Record<string, Record<string, unknown>> | undefined)?.museChrome);
 const durations = computed(() => [...new Set(selectedModel.value?.durationResolutionMap?.flatMap(option => option.duration) ?? [])].sort((a, b) => a - b));
 const resolutions = computed(() => [...new Set(selectedModel.value?.durationResolutionMap?.filter(option => !input.duration || option.duration.includes(input.duration)).flatMap(option => option.resolution) ?? [])]);
+const refreshError = ref("");
 const busy = ref(false), uploading = ref(false), refreshing = ref(false), error = ref("");
 const proposal = ref<Proposal>(), proposalInput = ref("");
 const proposalStale = computed(() => proposalInput.value !== JSON.stringify(input));
@@ -154,8 +155,8 @@ async function call<T>(name: string, body: Record<string, unknown> = {}): Promis
 async function refresh() {
   if (refreshing.value || disposed) return;
   refreshing.value = true;
-  try { batches.value = await call<BatchView[]>("list"); }
-  catch (cause) { if (!disposed) error.value = message(cause); }
+  try { batches.value = await call<BatchView[]>("list"); refreshError.value = ""; }
+  catch (cause) { if (!disposed) refreshError.value = message(cause); }
   finally { refreshing.value = false; }
 }
 async function poll() { await refresh(); if (!disposed) pollTimer = setTimeout(poll, 3000); }

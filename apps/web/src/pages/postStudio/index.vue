@@ -91,7 +91,7 @@ async function exportVideo() {
       const end = clip.end || duration;
       if (!Number.isFinite(duration) || !Number.isFinite(clip.start) || clip.start < 0 || end <= clip.start || end > duration) throw new Error(`Khoảng cắt không hợp lệ: ${clip.name}`);
       const path = `postWork/${id}/clip${index + 1}.mp4`;
-      await render(ffmpeg(clip.path).seekInput(clip.start).duration(end - clip.start).videoCodec("libx264").audioCodec("aac").outputOptions("-pix_fmt yuv420p", "-movflags +faststart"), path);
+      await render(ffmpeg(clip.path).seekInput(clip.start).duration(end - clip.start).videoCodec("libx264").audioCodec("aac").outputOptions("-pix_fmt", "yuv420p", "-movflags", "+faststart"), path);
       prepared.push({ path, mimeType: "video/mp4" });
     }
     progress.value = "Đang ghép clip theo thứ tự…";
@@ -101,7 +101,7 @@ async function exportVideo() {
     const finalPath = `postWork/${id}/thanhPham.mp4`, temporary = `postWork/${id}/thanhPham.partial.mp4`;
     const command = ffmpeg(merged);
     const inputs: { index: number; volume: number }[] = [{ index: 0, volume: snapshot.originalVolume }];
-    if (snapshot.music) { command.input(snapshot.music).inputOptions("-stream_loop -1"); inputs.push({ index: inputs.length, volume: snapshot.musicVolume }); }
+    if (snapshot.music) { command.input(snapshot.music).inputOptions("-stream_loop", "-1"); inputs.push({ index: inputs.length, volume: snapshot.musicVolume }); }
     if (snapshot.voice) { command.input(snapshot.voice); inputs.push({ index: inputs.length, volume: snapshot.voiceVolume }); }
     const filters = inputs.map(input => `[${input.index}:a:0]volume=${input.volume}[a${input.index}]`);
     filters.push(inputs.map(input => `[a${input.index}]`).join("") + `amix=inputs=${inputs.length}:duration=first:normalize=0[audio]`);
@@ -111,7 +111,7 @@ async function exportVideo() {
       command.videoFilter(`subtitles=filename='${path}'`);
     }
     progress.value = "Đang thêm âm thanh và phụ đề…";
-    command.complexFilter(filters.join(";")).outputOptions("-map 0:v:0", "-map [audio]", "-shortest", "-pix_fmt yuv420p", "-movflags +faststart").videoCodec("libx264").audioCodec("aac");
+    command.complexFilter(filters.join(";")).outputOptions("-map", "0:v:0", "-map", "[audio]", "-shortest", "-pix_fmt", "yuv420p", "-movflags", "+faststart").videoCodec("libx264").audioCodec("aac");
     await render(command, temporary);
     const info = await probe(ffmpeg, temporary);
     if (!(Number(info.format.duration) > 0) || !info.streams.some(stream => stream.codec_type === "video")) throw new Error("File xuất chưa phải MP4 hợp lệ.");
