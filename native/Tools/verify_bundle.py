@@ -14,20 +14,34 @@ for file in files + [main]:
     file_architectures = set(subprocess.check_output(['lipo', '-archs', str(file)], text=True).split())
     if not architectures.issubset(file_architectures):
         raise RuntimeError(f'Architecture mismatch in {file.name}: app={architectures}, library={file_architectures}')
-    loads = subprocess.check_output(['otool', '-L', str(file)], text=True).splitlines()[1:] if file != main else []
+    commands = subprocess.check_output(['otool', '-l', str(file)], text=True)
+    rpaths = []
+    for block in commands.split('Load command '):
+        if 'cmd LC_RPATH' in block:
+            rpaths.append(re.search(r'\bpath\s+(.+?)\s+\(offset', block).group(1))
+    loads = subprocess.check_output(['otool', '-L', str(file)], text=True).splitlines()[1:]
     for row in loads:
         path = row.strip().split(' (', 1)[0]
         if path.startswith(('/usr/lib/', '/System/Library/')):
             continue
+        # Swift's stable runtime ships with macOS. It may use @rpath with the
+        # system /usr/lib/swift search path rather than an absolute load path.
+        if file == main and re.fullmatch(r'@rpath/libswift[A-Za-z0-9_]+\.dylib', path) and '/usr/lib/swift' in rpaths:
+            continue
         if not path.startswith('@rpath/') or not (frameworks / path.removeprefix('@rpath/')).is_file():
             raise RuntimeError(f'Unbundled native load path {path} in {file}')
-    commands = subprocess.check_output(['otool', '-l', str(file)], text=True)
-    for block in commands.split('Load command '):
-        if file != main and 'cmd LC_RPATH' in block:
-            rpath = re.search(r'\bpath\s+(.+?)\s+\(offset', block).group(1)
+    for rpath in rpaths:
+        if file == main:
+            if rpath == '/usr/lib/swift':
+                continue
+            resolved = rpath.replace('@executable_path', str(main.parent)).replace('@loader_path', str(main.parent))
+            if not Path(resolved).is_absolute() or not Path(resolved).resolve().is_relative_to(app):
+                raise RuntimeError(f'Unexpected host rpath in {file.name}: {rpath}')
+        else:
             expected = '@loader_path' if file.parent == frameworks else '@loader_path/../../Frameworks'
             if rpath != expected:
                 raise RuntimeError(f'Unexpected host rpath in {file.name}: {rpath}')
+    for block in commands.split('Load command '):
         if 'cmd LC_BUILD_VERSION' in block:
             match = re.search(r'\bminos\s+([0-9.]+)', block)
         elif 'cmd LC_VERSION_MIN_MACOSX' in block:

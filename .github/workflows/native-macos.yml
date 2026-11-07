@@ -20,6 +20,8 @@ jobs:
           cache: npm
           cache-dependency-path: native/Tests/package-lock.json
       - run: python3 .github/scripts/native-check.py npm --prefix native/Tests ci --ignore-scripts
+      - name: Verify standalone bundle checks
+        run: python3 .github/scripts/native-check.py python3 -m unittest discover -s native/Tests -p 'test_*.py'
       - run: python3 .github/scripts/native-check.py npx --prefix native/Tests playwright install --with-deps chromium
       - name: Verify separate Chrome companion against fixture DOM
         run: |

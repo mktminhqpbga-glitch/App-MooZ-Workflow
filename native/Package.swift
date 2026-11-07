@@ -9,9 +9,9 @@ let package = Package(
     .executable(name: "MooZ", targets: ["MooZApp"]),
   ],
   targets: [
-    .systemLibrary(
-      name: "CSQLite", pkgConfig: "sqlite3",
-      providers: [.apt(["libsqlite3-dev"]), .brew(["sqlite3"])]),
+    // Use the SDK/system SQLite. pkg-config on a Mac build host can select a
+    // Homebrew dylib that is absent (or requires a newer OS) on the user's Mac.
+    .systemLibrary(name: "CSQLite"),
     .target(name: "MooZCore", dependencies: ["CSQLite"]),
     .executableTarget(name: "MooZApp", dependencies: ["MooZCore"]),
     .testTarget(name: "MooZCoreTests", dependencies: ["MooZCore"]),

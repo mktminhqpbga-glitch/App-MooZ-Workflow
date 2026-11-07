@@ -5,7 +5,7 @@ import subprocess
 
 for tool in ['ffmpeg', 'ffprobe']:
     if not shutil.which(tool):
-        raise SystemExit(f'Missing {tool}. Install ffmpeg-full and add its bin directory to PATH.')
+        raise SystemExit(f'Missing {tool}. Build with Tools/build_media_macos.py on Intel Mac, then add stage/bin to PATH; see native/README.md.')
 
 
 def names(option):
@@ -14,5 +14,5 @@ def names(option):
 
 
 if 'subtitles' not in names('-filters') or not {'libx264', 'aac'}.issubset(names('-encoders')) or 'lavfi' not in names('-devices'):
-    raise SystemExit('FFmpeg requires subtitles/libass, libx264 and AAC. On Mac use brew install ffmpeg-full and its bin directory in PATH.')
+    raise SystemExit('FFmpeg requires subtitles/libass, libx264, AAC and lavfi. For Intel Ventura use Tools/build_media_macos.py and stage/bin; see native/README.md.')
 print('PASS media prerequisites: subtitles/libass, H264/AAC, lavfi fixture input and ffprobe.')
