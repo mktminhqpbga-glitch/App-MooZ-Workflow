@@ -39,6 +39,7 @@ for native_tool in ffmpeg ffprobe; do
 done
 python3 "$native_root/Tools/bundle_dylibs.py" "$native_app"
 python3 "$native_root/Tools/verify_bundle.py" "$native_app"
+cp "$native_app/Contents/Resources/bundle-info.json" "$native_root/artifacts/native-bundle-info.json"
 python3 "$native_root/Tools/build_companion.py"
 mkdir -p "$native_app/Contents/Resources/Companion"
 ditto -x -k "$native_root/artifacts/MooZ-Connect-Native.zip" "$native_app/Contents/Resources/Companion"
@@ -51,5 +52,6 @@ codesign --force --deep --sign - "$native_app"
 codesign --verify --deep --strict "$native_app"
 native_archive="$native_root/artifacts/MooZ-Native-macOS-$(uname -m).zip"
 ditto -c -k --sequesterRsrc --keepParent "$native_app" "$native_archive"
-shasum -a 256 "$native_archive" "$native_root/artifacts/MooZ-Connect-Native.zip" > "$native_root/artifacts/SHA256SUMS.txt"
+cd "$native_root/artifacts"
+shasum -a 256 "$(basename "$native_archive")" MooZ-Connect-Native.zip > SHA256SUMS.txt
 printf '%s\n' "$native_app" 'Ad-hoc signed local/CI build. Developer ID signing and notarization are required for a public distribution.'

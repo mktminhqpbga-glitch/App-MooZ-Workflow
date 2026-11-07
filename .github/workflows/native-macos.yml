@@ -52,3 +52,4 @@ jobs:
             native/artifacts/native-smoke.json
             native/artifacts/native-smoke.png
             native/artifacts/native-smoke-final.mp4
+            native/artifacts/native-bundle-info.json

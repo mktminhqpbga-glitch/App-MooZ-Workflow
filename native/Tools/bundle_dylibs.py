@@ -36,8 +36,11 @@ def resolve(name, original, executable):
     raise RuntimeError(f'Cannot resolve {name} from {original}')
 
 def add_rpath(file, value):
-    if value not in rpaths(file):
-        subprocess.run(['install_name_tool', '-add_rpath', value, str(file)], check=True)
+    # CI has Homebrew installed: retaining its rpaths would let smoke tests silently
+    # load host libraries instead of proving the copied app is self-contained.
+    for previous in rpaths(file):
+        subprocess.run(['install_name_tool', '-delete_rpath', previous, str(file)], check=True)
+    subprocess.run(['install_name_tool', '-add_rpath', value, str(file)], check=True)
 
 def process(target, original, executable):
     own_id = output('otool', '-D', str(original)).splitlines()[1:] if original.suffix == '.dylib' else []
