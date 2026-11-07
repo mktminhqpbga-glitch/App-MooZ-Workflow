@@ -41,6 +41,8 @@ export async function createApp({
   // conf 由下方的路由动态加载，必须先确定整个进程共用的数据目录。
   if (dataDirectory) process.env.TOONFLOW_DATA_DIR = resolve(dataDirectory);
   const { default: conf } = await import("@/utils/conf");
+  const localSettings = conf.get("settings", {});
+  if (localSettings.multiTenantEnabled === true) conf.set("settings", { ...localSettings, multiTenantEnabled: false });
   const providerDirectory = resolve(dirname(conf.path), "providers");
   const providerDirectoryInfo = await lstat(providerDirectory).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
@@ -118,6 +120,14 @@ export async function createApp({
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
   app.use("/api/desktop", desktopRequest);
 
+  // Local edition: no account, advertising, community or tenant administration endpoints.
+  app.use(["/api/channel", "/api/multiTenant"], (req, res, next) => {
+    if (req.method === "GET" && req.originalUrl.split("?")[0]?.toLowerCase() === "/api/multitenant/user/session") {
+      return res.json({ code: 200, data: { enabled: false, publicWeb: false, host: false, registrationEnabled: false, user: null }, message: "" });
+    }
+    res.status(404).json({ code: 404, data: null, message: "Bản cục bộ không sử dụng tài khoản Toonflow Cloud." });
+  });
+
   const router = await import("@/router");
   router.default(app);
   const [{ createMcpRouter }, { getMcpTools, runInMcpRequest }, { authorizeMcp }, { skillResources }] = await Promise.all([
@@ -142,6 +152,9 @@ export async function createApp({
     const body = errorFromCause(err);
     response.status(body.code).json(body);
   });
+
+  const { initialize: initializeBatch } = await import("@/utils/batch");
+  await initializeBatch();
 
   const { initializeMobileLinkRuntime } = await import("@/utils/mobileLink");
   initializeMobileLinkRuntime(app);

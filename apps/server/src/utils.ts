@@ -1,3 +1,4 @@
+import * as batch from "@/utils/batch";
 import * as assets from "@/utils/assets";
 import * as browser from "@/utils/browser";
 import * as singleAgent from "@/utils/singleAgent";
@@ -40,6 +41,7 @@ import * as channel from "@/utils/channel";
 import * as multiTenant from "@/utils/multiTenant";
 
 export default {
+  batch,
   assets,
   browser,
   singleAgent,

@@ -37,6 +37,7 @@ export default defineConfig(({ command }) => ({
     ],
   },
   build: {
+    target: "safari16",
     outDir: "../../build/web",
     emptyOutDir: true,
   },

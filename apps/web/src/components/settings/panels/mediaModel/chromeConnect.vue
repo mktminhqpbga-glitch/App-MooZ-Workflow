@@ -1,6 +1,8 @@
 <template>
   <el-collapse class="chromeConnect">
     <el-collapse-item :title="translate('Chrome Connect · Muse, máy khác và VM')" name="chrome">
+      <el-button :loading="downloading" @click="downloadExtension">{{ translate("Tải extension Chrome Connect (.zip)") }}</el-button>
+      <p>{{ translate("Giải nén ZIP, mở chrome://extensions, bật Chế độ nhà phát triển và chọn Tải tiện ích đã giải nén. Áp dụng cho máy này, máy khác và VM.") }}</p>
       <el-form labelPosition="top" @submit.prevent>
         <el-form-item :label="translate('Địa chỉ relay')"><el-input v-model="relayUrl" placeholder="https://your-relay.onrender.com" /></el-form-item>
         <el-form-item :label="translate('Relay controller token')"><el-input v-model="controllerToken" type="password" showPassword autocomplete="off" /></el-form-item>
@@ -36,6 +38,7 @@ import { ref } from "vue";
 import axios from "axios";
 import { ElMessage } from "element-plus";
 import { translate } from "@toonflow/i18n/vue";
+import saveFile from "@/lib/saveFile";
 import { settings, saveSettings } from "@/stores/settings";
 
 type Tab = { id: number; title?: string; url: string };
@@ -50,6 +53,14 @@ const devices = ref<Device[]>([]);
 const message = ref("");
 const selected = ref(existing?.conversationUrl ?? "");
 const busy = ref(false);
+const downloading = ref(false);
+async function downloadExtension() {
+  if (downloading.value) return;
+  downloading.value = true;
+  try { await saveFile(() => axios.get<Blob>("/downloads/toonflowChromeConnect.zip", { responseType: "blob" }).then(({ data }) => data), "toonflowChromeConnect.zip"); }
+  catch (error) { ElMessage.error(error instanceof Error ? error.message : "Không tải được extension"); }
+  finally { downloading.value = false; }
+}
 const headers = { "x-toonflow-workspace": "1" };
 
 async function run(action: () => Promise<void>) {

@@ -19,7 +19,8 @@
     "./agent/types": "./src/agent/runtime/types.ts",
     "./singleAgent/types": "./src/utils/singleAgent/types.ts",
     "./agent/mentionSources": "./src/agent/mentionSources.ts",
-    "./i18n": "./src/lib/i18n.ts"
+    "./i18n": "./src/lib/i18n.ts",
+    "./batch": "./src/utils/batch/composer.ts"
   },
   "scripts": {
     "routes": "bun src/core.ts",

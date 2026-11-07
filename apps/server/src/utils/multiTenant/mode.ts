@@ -1,5 +1,4 @@
-import conf from "@/utils/conf";
-
 export const creationPort = 10888;
 
-export function isEnabled() { return conf.get("settings", {}).multiTenantEnabled === true; }
+// This fork is a local workstation; cloud accounts and tenant listeners are unavailable.
+export function isEnabled() { return false; }

@@ -21,7 +21,7 @@ let applyingSettings = false;
 let multiTenantVersion = 0;
 let settingsRevision: number | undefined;
 
-export const multiTenantEnabled = computed(() => settings.value.multiTenantEnabled === true);
+export const multiTenantEnabled = computed(() => false);
 
 export function applyMultiTenantEnabled(enabled: boolean) {
   multiTenantVersion++;
@@ -110,10 +110,7 @@ export const privacySettings = computed(() => {
 
 export type CustomProviderModel = { id: string; label: string; contextWindow?: number; maxOutputTokens?: number; reasoningEfforts?: ReasoningEfforts };
 export type CustomProvider = { id: string; label: string; icon?: string; version?: string; apiUrl: string; apiKey: string; headers?: Record<string, string>; protocol: string; models: CustomProviderModel[] };
-export const toonflowAccountToken = computed(() => {
-  const account = settings.value.toonflowAccount as { token?: unknown } | null | undefined;
-  return typeof account?.token === "string" ? account.token.trim() : "";
-});
+export const toonflowAccountToken = computed(() => "");
 export const customProviders = computed<CustomProvider[]>(() => {
   const providers = Array.isArray(settings.value.customProviders) ? [...settings.value.customProviders] : [];
   const accountProvider = settings.value.toonflowProvider as CustomProvider | null | undefined;

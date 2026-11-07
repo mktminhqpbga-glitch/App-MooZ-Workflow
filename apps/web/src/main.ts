@@ -1,3 +1,4 @@
+import "./lib/venturaRuntime";
 import { createApp, h, nextTick, ref, type App } from "vue";
 import { ElButton, ElResult } from "element-plus";
 import { isRtlLocale } from "@toonflow/i18n";

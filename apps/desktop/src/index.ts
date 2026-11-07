@@ -8,6 +8,7 @@ import { existsSync, writeAtomicSync } from "@toonflow/file";
 import { file } from "@toonflow/file/bun";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
 import { dlopen, ptr } from "bun:ffi";
 import type { DesktopRuntime, PluginInstallRequest } from "@toonflow/server/desktop";
 import { showNativeSplash } from "@toonflow/startup";
@@ -101,7 +102,9 @@ async function start() {
     // Linux 安装目录由包管理器管理，数据使用 XDG 用户目录；Windows/macOS 保留原位置。
     const installDirectory = resolve(PATHS.RESOURCES_FOLDER, process.platform === "darwin" ? "../../.." : "../..");
     const dataDirectory = process.env.TOONFLOW_DATA_DIR ?? (process.platform === "linux"
-      ? resolve(Utils.paths.appData, "toonflow/data") : resolve(installDirectory, "data"));
+      ? resolve(Utils.paths.appData, "toonflow/data")
+      : process.platform === "darwin" ? resolve(homedir(), "Library/Application Support/ToonflowMooZ")
+      : resolve(installDirectory, "data"));
     // ACT: 先显示原生动画，再加载服务，避免初始化期间没有反馈。
     const startupSettings = await file(resolve(dataDirectory, "settings.json")).json().catch((error) => {
       if (error.code !== "ENOENT") console.error("读取启动设置失败，使用默认启动动画：", error);

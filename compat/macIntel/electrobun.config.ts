@@ -14,6 +14,7 @@ export default {
       "../../build/desktop/bundledTools": "views/ffmpeg/darwin-x64",
       "../../docs/thirdPartyNotices.md": "notices.md",
       "../../LICENSE": "license.txt",
+      "../../docs/toonflowMitLicense.txt": "licenses/toonflowMit.txt",
       "../../build/mcp": "mcp",
       "../../build/web": "views/mainview",
       "../../build/tools": "tools",

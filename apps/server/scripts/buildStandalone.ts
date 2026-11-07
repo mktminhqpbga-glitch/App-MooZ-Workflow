@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { readdir, rm } from "@toonflow/file";
+import { copyFileSync, mkdirSync, readdir, rm } from "@toonflow/file";
 import { resolve } from "node:path";
 
 const projectDir = resolve(import.meta.dirname, "../../..");
@@ -16,5 +16,8 @@ for (const group of ["nodes", "tools", "ext"]) {
   }
 }
 
+await $`${process.execPath} run build`.cwd(resolve(projectDir, "apps/chromeExtension"));
 await $`${process.execPath} run build`.cwd(resolve(projectDir, "apps/web"));
+mkdirSync(resolve(projectDir, "build/web/downloads"), { recursive: true });
+copyFileSync(resolve(projectDir, "build/toonflowChromeConnect.zip"), resolve(projectDir, "build/web/downloads/toonflowChromeConnect.zip"));
 await $`${process.execPath} run build`.cwd(resolve(projectDir, "apps/server"));
