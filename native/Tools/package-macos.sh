@@ -37,6 +37,10 @@ for native_tool in ffmpeg ffprobe; do
   native_tool_path="$(command -v "$native_tool")"
   cp "$native_tool_path" "$native_app/Contents/Resources/bin/$native_tool"
 done
+native_media_share="$(dirname "$(dirname "$(command -v ffmpeg)")")/share/mooz-media"
+if [ -d "$native_media_share" ]; then
+  cp -R "$native_media_share" "$native_app/Contents/Resources/MediaSources"
+fi
 python3 "$native_root/Tools/bundle_dylibs.py" "$native_app"
 python3 "$native_root/Tools/verify_bundle.py" "$native_app"
 cp "$native_app/Contents/Resources/bundle-info.json" "$native_root/artifacts/native-bundle-info.json"

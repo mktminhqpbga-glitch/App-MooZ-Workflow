@@ -40,6 +40,11 @@ plist = app / 'Contents/Info.plist'
 with plist.open('rb') as stream:
     info = plistlib.load(stream)
 info['LSMinimumSystemVersion'] = '.'.join(map(str, minimum))
+if os.environ.get('MOOZ_MAX_MINIMUM_MACOS'):
+    def normalized(value):
+        return tuple((list(map(int, value.split('.'))) + [0, 0, 0])[:3])
+    if normalized(info['LSMinimumSystemVersion']) > normalized(os.environ['MOOZ_MAX_MINIMUM_MACOS']):
+        raise RuntimeError(f'Bundle requires macOS {info["LSMinimumSystemVersion"]}; target is {os.environ["MOOZ_MAX_MINIMUM_MACOS"]}')
 with plist.open('wb') as stream:
     plistlib.dump(info, stream)
 report = {'minimumMacOS': info['LSMinimumSystemVersion'], 'architectures': sorted(architectures), 'bundledDylibs': len(files) - 2}

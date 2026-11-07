@@ -27,15 +27,36 @@ jobs:
           CHROMIUM_PATH="$(node -p 'require("./native/Tests/node_modules/playwright").chromium.executablePath()')" python3 .github/scripts/native-check.py node native/Tests/companion.browser.cjs
   native:
     runs-on: macos-15-intel
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v4
+        id: media-cache
+        with:
+          path: ${{ runner.temp }}/mooz-media-ventura
+          key: ventura-media-x86_64-${{ hashFiles('native/Tools/media-sources.json') }}-${{ hashFiles('native/Tools/build_media_macos.py') }}
+          restore-keys: |
+            ventura-media-x86_64-${{ hashFiles('native/Tools/media-sources.json') }}-
       - name: Native prerequisites
         run: |
           swift --version
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full
-          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install pkgconf meson ninja nasm
+      - name: Build pinned media tools for Intel Ventura 13
+        env:
+          MOOZ_MEDIA_BUILD_ROOT: ${{ runner.temp }}/mooz-media-ventura
+        run: python3 .github/scripts/native-check.py python3 native/Tools/build_media_macos.py
+      - uses: actions/cache/save@v4
+        if: always() && steps.media-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/mooz-media-ventura
+          key: ventura-media-x86_64-${{ hashFiles('native/Tools/media-sources.json') }}-${{ hashFiles('native/Tools/build_media_macos.py') }}
       - name: Test and package native Swift app
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+          MOOZ_MAX_MINIMUM_MACOS: '13.0'
         run: python3 .github/scripts/native-check.py bash native/Tools/package-macos.sh
       - name: Verify app launch
         run: |
