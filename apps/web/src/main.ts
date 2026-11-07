@@ -15,7 +15,7 @@ import { getMissingBrowserFeatures } from "@/lib/browserCapabilities";
 import { publicWeb } from "@/stores/multiTenant";
 import { detectLocale, locale, setLocale, translate } from "@toonflow/i18n/vue";
 
-setLocale(detectLocale(navigator.languages));
+setLocale("vi");
 document.documentElement.classList.toggle("dark", window.matchMedia("(prefers-color-scheme: dark)").matches);
 document.documentElement.lang = locale.value;
 document.documentElement.dir = isRtlLocale(locale.value) ? "rtl" : "ltr";

@@ -47,6 +47,7 @@
     <el-scrollbar ref="pageScroll" class="pageScroll" @scroll="updateActiveSection">
       <div class="pageBody">
         <el-main class="pageContent">
+          <nav class="studioModules" aria-label="Các xưởng sáng tạo"><router-link to="/images"><strong>Tạo ảnh hàng loạt</strong><span>Tổ chức ảnh sản phẩm và nhân vật, prompt và thành phẩm.</span></router-link><router-link to="/videos"><strong>Tạo video hàng loạt</strong><span>Từng cảnh, từng clip, ghép thành MP4 theo thứ tự.</span></router-link><a href="#" @click.prevent="scrollToSection('projects')"><strong>Canvas</strong><span>Mở dự án và nối các bước sáng tạo trên bảng vẽ.</span></a></nav>
           <section class="creationPanel" data-home-section="home" aria-label="创建项目">
             <div class="brand">
               <el-image class="brandLogo" :src="logoUrl" fit="contain" alt="Toonflow" />
@@ -458,7 +459,7 @@ async function createProject(fromPrompt = true) {
   try {
     const { directory, empty } = await useWorkspaceFiles(path).list();
     if (fromPrompt && !empty) return ElMessage.warning("该文件夹不为空，请重新选择空文件夹；已有项目请使用“新建项目”入口或点击项目列表打开。");
-    if (empty) await useWorkspaceFiles(directory).writeJson("画布1.json", { toonflowCanvas: true, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, true);
+    if (empty) await useWorkspaceFiles(directory).writeJson("Canvas1.json", { toonflowCanvas: true, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, true);
     await workspaceStore.openProject(directory);
     if (fromPrompt && (prompt.value.trim() || promptAttachments.value.length)) {
       workspaceStore.pendingAgentMessage = { directory: workspaceStore.project!.directory, prompt: prompt.value, attachments: [...promptAttachments.value], model: selectedModel.value, reasoningEffort: reasoningEffort.value };
@@ -475,6 +476,7 @@ async function createProject(fromPrompt = true) {
 </script>
 
 <style lang="scss" scoped>
+.studioModules { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin-bottom: 32px; a { display: flex; flex-direction: column; gap: 12px; padding: 22px; border: 1px solid var(--el-border-color); border-radius: 16px; color: inherit; text-decoration: none; background: var(--el-bg-color-overlay); strong { font-size: 17px; } span { color: var(--el-text-color-secondary); line-height: 1.6; font-size: 12px; } &:hover { border-color: var(--el-color-primary); } } }
 .home {
   --sidebarWidth: 240px;
   --sidebarMotion: 220ms;

@@ -1,11 +1,13 @@
 <template>
   <el-config-provider :locale="elementLocale">
     <config-provider :globalConfig="tdesignLocale">
+      <studioShell>
       <router-view v-slot="{ Component: currentComponent }">
         <transition name="el-fade-in" mode="out-in">
           <component :is="currentComponent" />
         </transition>
       </router-view>
+      </studioShell>
       <loadingPage v-model:visible="workspaceStore.projectLoadingVisible" v-model:drawn="workspaceStore.projectLoadingDrawn" :active="workspaceStore.projectLoading" />
       <ffmpegRequired v-if="currentUser?.role !== 'user'" />
       <desktopQuit v-if="actualPlatform.isDesktop" />
@@ -61,6 +63,7 @@ import { saveSettings, settings, uiSettings } from "@/stores/settings";
 import { desktopUpdateSnapshot, stopDesktopUpdateObservation } from "@/stores/desktopUpdate";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { currentUser } from "@/stores/multiTenant";
+import studioShell from "@/components/studioShell.vue";
 import loadingPage from "@/components/loadingPage.vue";
 import { useMcpControl } from "@/lib/mcpControl";
 import ffmpegRequired from "@/components/settings/ffmpegRequired.vue";
@@ -159,6 +162,8 @@ onBeforeUnmount(registerAppearance());
 
 <style lang="scss">
 html {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --el-font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background-color: var(--el-bg-color);
   color: var(--el-text-color-primary);
 }

@@ -5,6 +5,7 @@
 </template>
 
 <script setup lang="ts">
+import { translateUiRules } from "@toonflow/i18n/rules";
 import { computed } from "vue";
 import formCreate, { type Options } from "@form-create/element-ui";
 import {
@@ -15,7 +16,7 @@ import type { NodeMediaModel } from "@toonflow/nodes-scaffold/runtime";
 
 const props = defineProps<{ rules?: NodeMediaModel["rules"]; disabled?: boolean }>();
 const other = defineModel<Record<string, unknown>>({ required: true });
-const formState = computed(() => ({ rules: formCreate.copyRules(props.rules ?? []), key: Symbol() }));
+const formState = computed(() => ({ rules: translateUiRules(formCreate.copyRules(props.rules ?? [])), key: Symbol() }));
 const formOptions = computed<Options>(() => ({
   form: { labelPosition: "top", size: "small", disabled: props.disabled },
   appendValue: false,

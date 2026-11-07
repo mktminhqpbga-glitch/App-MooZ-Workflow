@@ -4,6 +4,7 @@ import * as browser from "@/utils/browser";
 import * as singleAgent from "@/utils/singleAgent";
 import * as desktop from "@/utils/desktop";
 import * as providerDebug from "@/utils/media/debug";
+import * as mediaRender from "@/utils/media/render";
 import * as mediaGeneration from "@/utils/media/generation";
 import * as mediaSchemas from "@/utils/media/schemas";
 import * as mediaTasks from "@/utils/media/tasks";
@@ -47,6 +48,7 @@ export default {
   singleAgent,
   desktop,
   providerDebug,
+  mediaRender,
   mediaGeneration,
   mediaSchemas,
   mediaTasks,

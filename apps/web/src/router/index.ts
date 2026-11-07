@@ -17,6 +17,10 @@ const router = createRouter({
       path: "/home",
       component: () => import("@/pages/home/index.vue"),
     },
+    { path: "/post", component: () => import("@/pages/postStudio/index.vue") },
+    { path: "/library", component: () => import("@/pages/library/index.vue") },
+    { path: "/images", component: () => import("@/pages/batchStudio/index.vue"), props: { mediaType: "image" } },
+    { path: "/videos", component: () => import("@/pages/batchStudio/index.vue"), props: { mediaType: "video" } },
     {
       path: "/canvas",
       redirect: "/workspace",

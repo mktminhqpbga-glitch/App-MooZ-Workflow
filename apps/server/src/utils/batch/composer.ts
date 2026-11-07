@@ -4,6 +4,13 @@ import { z } from "zod";
 
 const relativePath = z.string().min(1).max(2048).refine(path => !/^[\\/]|[:\u0000-\u001f]/.test(path) && path.split(/[\\/]/).every(part => part && part !== "." && part !== ".."));
 export const batchInputSchema = z.strictObject({
+  mediaType: z.enum(["image", "video"]).default("video"),
+  splitMode: z.enum(["blocks", "lines", "paragraphs", "whole"]).optional(),
+  sceneMode: z.boolean().optional(),
+  negativePrompt: z.string().max(4000).optional(),
+  commonPrompt: z.string().max(4000).optional(),
+  size: z.string().max(64).optional(),
+  other: z.record(z.string(), z.json()).optional(),
   name: z.string().trim().min(1).max(120),
   text: z.string().trim().min(1).max(100000),
   eachLine: z.boolean(),
@@ -11,7 +18,7 @@ export const batchInputSchema = z.strictObject({
   mode: z.enum(["text", "images", "frames", "extend"]),
   providerId: z.string().regex(/^[a-z][a-zA-Z0-9]{0,95}$/),
   modelId: z.string().min(1).max(256),
-  ratio: z.enum(["9:16", "16:9", "1:1"]),
+  ratio: z.string().regex(/^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
   duration: z.number().positive().max(3600).optional(),
   resolution: z.string().min(1).max(64).optional(),
   copies: z.number().int().min(1).max(10),
@@ -35,7 +42,26 @@ export function prompts(text: string, eachLine = true): string[][] {
 }
 
 export function planBatch(input: BatchInput): BatchPlan[] {
-  const rows = prompts(input.text, input.eachLine);
+  let rows = input.splitMode ? [] : prompts(input.text, input.eachLine);
+  if (input.splitMode) {
+    let requests: string[];
+    if (input.splitMode === "blocks") {
+      requests = [];
+      let depth = 0, start = -1;
+      for (let index = 0; index < input.text.length; index++) {
+        const character = input.text[index];
+        if (character === "[") { if (depth++ === 0) start = index + 1; }
+        else if (character === "]") {
+          if (!depth) throw new Error("Dấu ] không có dấu [ tương ứng.");
+          if (--depth === 0) requests.push(input.text.slice(start, index).trim());
+        } else if (!depth && character?.trim()) throw new Error("Bọc mỗi yêu cầu trong [ ... ], hoặc đổi cách tách prompt.");
+      }
+      if (depth) throw new Error("Khối prompt chưa đóng dấu ].");
+    } else requests = input.splitMode === "lines" ? input.text.split(/\r?\n/) : input.splitMode === "paragraphs" ? input.text.split(/\r?\n\s*\r?\n/) : [input.text];
+    rows = requests.map(request => request.trim()).filter(Boolean).map(request => input.mediaType === "video" && input.sceneMode ? request.split(/\r?\n/).map(scene => scene.trim()).filter(Boolean) : [request]);
+    if (!rows.length || rows.length > 100 || rows.some(row => row.length > 12 || row.some(scene => scene.length > 4000))) throw new Error("Tối đa 100 yêu cầu, 12 cảnh/video và 4.000 ký tự/cảnh.");
+  }
+  if (input.mediaType === "image" && (input.mode === "frames" || input.mode === "extend" || rows.some(row => row.length !== 1))) throw new Error("Tạo ảnh dùng văn bản hoặc ảnh tham chiếu, mỗi yêu cầu là một ảnh độc lập.");
   if (new Set(input.references.map(ref => ref.tag)).size !== input.references.length) throw new Error("Thẻ ảnh tham chiếu bị trùng.");
   const products = input.references.filter(ref => ref.role === "product");
   const characters = input.references.filter(ref => ref.role === "character");
@@ -61,5 +87,5 @@ export function planBatch(input: BatchInput): BatchPlan[] {
 
 export type BatchOutput = { path: string; mimeType: string };
 export type BatchScene = { prompt: string; taskId: string; state: string; outputs?: BatchOutput[]; selectedPath?: string; request?: Record<string, unknown>; error?: string };
-export type BatchJob = BatchPlan & { id: string; scenes: string[]; clips: BatchScene[]; state: string; output?: BatchOutput; error?: string };
+export type BatchJob = BatchPlan & { id: string; scenes: string[]; clips: BatchScene[]; state: string; output?: BatchOutput; outputs?: BatchOutput[]; error?: string };
 export type BatchView = { id: string; name: string; directory: string; running: boolean; createdAt: number; error?: string; jobs: BatchJob[]; input: BatchInput };

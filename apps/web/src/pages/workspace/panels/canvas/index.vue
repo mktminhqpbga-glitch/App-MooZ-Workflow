@@ -131,6 +131,7 @@
 </template>
 
 <script setup lang="ts">
+import * as i18nRuntime from "@toonflow/i18n/vue";
 import { t, translate } from "@toonflow/i18n/vue";
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowReactive, shallowRef, watch } from "vue";
 import axios from "axios";
@@ -1236,10 +1237,10 @@ onBeforeUnmount(() => {
 });
 
 const nodeWindow = window as typeof window & {
-  toonflowNodeHost?: { vue: typeof vueRuntime; vueFlow: typeof vueFlowRuntime; elementPlus: typeof elementPlusRuntime; three: typeof threeRuntime; modelIcons: typeof modelIcons; ai: { runAgentLoop: typeof runAgentLoop; createAssistantMessageEventStream: typeof createAssistantMessageEventStream } };
+  toonflowNodeHost?: { i18n: typeof i18nRuntime; vue: typeof vueRuntime; vueFlow: typeof vueFlowRuntime; elementPlus: typeof elementPlusRuntime; three: typeof threeRuntime; modelIcons: typeof modelIcons; ai: { runAgentLoop: typeof runAgentLoop; createAssistantMessageEventStream: typeof createAssistantMessageEventStream } };
   toonflowNodes?: NodeTypesObject;
 };
-nodeWindow.toonflowNodeHost = { vue: vueRuntime, vueFlow: vueFlowRuntime, elementPlus: elementPlusRuntime, three: threeRuntime, modelIcons, ai: { runAgentLoop, createAssistantMessageEventStream } };
+nodeWindow.toonflowNodeHost = { i18n: i18nRuntime, vue: vueRuntime, vueFlow: vueFlowRuntime, elementPlus: elementPlusRuntime, three: threeRuntime, modelIcons, ai: { runAgentLoop, createAssistantMessageEventStream } };
 provide("nodeConfig", (nodeType: string) => nodeConfigs.value[nodeType] ?? {});
 provide("workspaceFiles", () => {
   const directory = project.value?.directory;
@@ -1319,7 +1320,7 @@ async function loadRemoteNodes(reloadName?: string, requireReload = false) {
     nodeConfigs.value = Object.fromEntries(nodes.map(node => [`remote-${node.name}`, node.config ?? {}]));
     const enabledNodes = nodes.filter(node => node.enabled !== false);
     // 节点各自加载完成后即可出现在菜单中，不等待其他节点的脚本。
-    nodeOptions.value = enabledNodes.map(node => ({ type: `remote-${node.name}`, label: node.displayName }))
+    nodeOptions.value = enabledNodes.map(node => ({ type: `remote-${node.name}`, label: translate(node.displayName) }))
       .sort((left, right) => left.type.localeCompare(right.type));
     if (requireReload && !enabledNodes.some(node => node.name === reloadName)) throw new Error("节点类型未启用或尚未加载，请先查询 getCanvas");
     // ACT: 安装事件合并到最新列表请求，避免连续更新不同节点时丢失较早的刷新名称。

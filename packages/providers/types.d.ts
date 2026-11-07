@@ -93,6 +93,8 @@ interface ProviderTools {
   /** 提取供应商错误正文中的可读原因，并隐藏配置中的密钥和 URL 查询参数。 */
   errorMessage(value: unknown): string;
   hash: typeof Bun.hash;
+  /** SHA256 hex for immutable browser dispatch fingerprints. */
+  sha256(value: string | Uint8Array): string;
   image: typeof Bun.Image;
   /** 公共图片基础处理工具；供应商可在 processMedia 中按自身模型能力使用。 */
   media: {

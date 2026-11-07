@@ -7,7 +7,7 @@ type MobileConnection = { mode: "local" | "remote"; name?: string; url?: string;
 
 export const mobileConnection = ref<MobileConnection>({ mode: actualPlatform.isRemoteConnection ? "remote" : "local" });
 export const deviceHubEnabled = ref(false);
-export const deviceConnectionSupported = ref(true);
+export const deviceConnectionSupported = ref(actualPlatform.isMobile || actualPlatform.isDesktop);
 export function getDeviceVersionWarning(appVersion?: string, remoteAppVersion?: string) {
   if (!appVersion || !remoteAppVersion) return t`无法确认设备版本（本机：${appVersion || translate("未知")}，对方：${remoteAppVersion || translate("未知")}），建议双方升级到同一版本。`;
   return appVersion === remoteAppVersion ? "" : t`设备版本不一致（本机：${appVersion}，对方：${remoteAppVersion}），可能影响部分功能，建议双方升级到同一版本。`;

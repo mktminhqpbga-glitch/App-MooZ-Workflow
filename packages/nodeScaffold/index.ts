@@ -5,6 +5,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import type { Rule } from "@form-create/element-ui";
 import { z } from "zod";
+import { i18nPlugin } from "@toonflow/i18n/vite";
 import postcssConfig from "../../postcss.config.ts";
 
 const tiptapGlobals = {
@@ -60,6 +61,7 @@ export function createNodeConfig(config: NodeConfig, configUrl: string, options:
     root,
     css: { postcss: postcssConfig },
     plugins: [
+      i18nPlugin(),
       vue(),
       {
         name: "syncNodeFile",
@@ -124,11 +126,12 @@ export function createNodeConfig(config: NodeConfig, configUrl: string, options:
         fileName: () => fileName,
       },
       rolldownOptions: {
-        external: ["vue", "@vue/runtime-core", "@vue/runtime-dom", "@vue-flow/core", "element-plus", "three", "@toonflow/model-icons", "@earendil-works/pi-agent-core", "@earendil-works/pi-ai", ...Object.keys(tiptapGlobals)],
+        external: ["@toonflow/i18n/vue", "vue", "@vue/runtime-core", "@vue/runtime-dom", "@vue-flow/core", "element-plus", "three", "@toonflow/model-icons", "@earendil-works/pi-agent-core", "@earendil-works/pi-ai", ...Object.keys(tiptapGlobals)],
         output: {
           exports: "default",
           globals: {
             ...tiptapGlobals,
+            "@toonflow/i18n/vue": "toonflowNodeHost.i18n",
             vue: "toonflowNodeHost.vue",
             "@vue/runtime-core": "toonflowNodeHost.vue",
             "@vue/runtime-dom": "toonflowNodeHost.vue",

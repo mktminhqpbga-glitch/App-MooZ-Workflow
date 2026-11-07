@@ -1,3 +1,11 @@
+# Chrome Connect trong bản MooZ CVN mới
+
+Bản app Intel tự mở relay loopback, sinh khóa riêng và lưu vào thư mục Application Support. Người dùng không cần Bun/Node hay Terminal. Chrome trên máy khác/VM dùng relay Render HTTPS trong cùng bảng Cài đặt; Render chưa được triển khai tự động và blueprint Starter có phí, cần tài khoản của người dùng.
+
+Provider Muse khai báo ảnh và video (văn bản/ảnh tham chiếu), dùng bridge app-mooz, UUID + mã lượt + SHA256 + device/epoch/tab/cuộc trò chuyện. File video phải được FFprobe xác nhận trước lưu trạng thái hoàn tất và ACK; ảnh phải giải mã được. Busy chờ, lượt gửi chưa rõ chỉ đối chiếu cùng UUID. Chưa nghiệm thu tạo nội dung bằng tài khoản Muse thật hoặc WSS trên máy khác/VM.
+
+Các ghi chú triển khai giai đoạn đầu bên dưới mô tả nguồn gốc MVP; phạm vi hiện tại ở đoạn trên và docs/batchVideo.md.
+
 # Toonflow + Muse Chrome Connect
 
 This branch imports Toonflow upstream `6086cdffceb704a632eca143dd16cd461a78cdac`.

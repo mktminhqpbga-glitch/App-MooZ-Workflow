@@ -12,6 +12,7 @@ const appDirectory = resolve(import.meta.dirname, fromSource ? "../../.." : "../
 const dataDirectory = process.env.TOONFLOW_DATA_DIR ?? resolve(appDirectory, "data");
 const app = await createApp({
   webRoot: resolve(appDirectory, "build/web"),
+  chromeRelay: process.env.TOONFLOW_EMBEDDED_CHROME_RELAY === "1",
   appVersion: config.app.version,
   dataDirectory,
   toolsRoot: resolve(appDirectory, "build/tools"),

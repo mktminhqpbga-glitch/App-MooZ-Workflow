@@ -9,7 +9,7 @@ const rules = [
 type Context = ProviderContext<ProviderConfig<typeof rules>>;
 type Receipt = ProviderTaskData & { requestId: string; requestCode: string; relayUrl: string; deviceId: string; epoch: string; tabId: number; conversationUrl: string; fingerprint: string; request: ProviderTaskData; phase: string };
 type Tab = { id: number; url: string };
-type Poll = { ok?: boolean; state?: string; result?: { ok?: boolean; error?: string; partial?: boolean; expectedItems?: number; items?: { id: string; url: string }[]; url?: string; conversationUrl?: string; receipt?: { requestId: string; requestCode: string; sentTurnMatchesRequestId: boolean } } };
+type Poll = { ok?: boolean; state?: string; result?: { videoResultProtocol?: number; ok?: boolean; error?: string; partial?: boolean; expectedItems?: number; items?: { id: string; url: string }[]; url?: string; conversationUrl?: string; receipt?: { requestId: string; requestCode: string; sentTurnMatchesRequestId: boolean } } };
 
 function relayUrl(context: Context) {
   const value = new URL(context.config.relayUrl);
@@ -61,6 +61,7 @@ async function waitForResult(context: Context, data: Receipt): Promise<MediaAsse
     deviceId: data.deviceId, epoch: data.epoch, tabId: data.tabId, conversationUrl: data.conversationUrl,
     requestId: data.requestId, requestCode: data.requestCode, fingerprint: data.fingerprint,
   });
+  const mediaType = data.request.mediaType === "video" ? "video" : "image";
   while (true) {
     context.signal?.throwIfAborted();
     let tab: Tab;
@@ -75,8 +76,9 @@ async function waitForResult(context: Context, data: Receipt): Promise<MediaAsse
     const poll = await call<Poll>(context, data, "tabs.message", { id: data.tabId, message: { type: "MUSEFLOW_JOB_STATUS", requestId: data.requestId } });
     if (poll.state === "missing") {
       if (dispatch.phase !== "registered") throw new Error("Chrome mất receipt của lượt đã cấp quyền gửi. Kiểm tra tab gốc; không tạo lại ảnh");
-      const health = await call<{ busy?: boolean; composer?: boolean; signedIn?: boolean; nativeProtocol?: number }>(context, data, "tabs.message", { id: data.tabId, message: { type: "MUSEFLOW_CHECK_SESSION" } });
+      const health = await call<{ busy?: boolean; composer?: boolean; signedIn?: boolean; nativeProtocol?: number; videoResultProtocol?: number; modeProtocol?: number }>(context, data, "tabs.message", { id: data.tabId, message: { type: "MUSEFLOW_CHECK_SESSION" } });
       if (health.busy) { await pause(context); continue; }
+      if (mediaType === "video" && (health.videoResultProtocol !== 1 || health.modeProtocol !== 1)) throw new Error("Cập nhật extension để nhận video đúng giao thức.");
       if (!health.composer || !health.signedIn || health.nativeProtocol !== 1) throw new Error("Đăng nhập Muse và tải lại tab với Toonflow Chrome Connect");
       const claimed = await api<{ dispatchToken: string }>(context, "/api/dispatch", {
         deviceId: data.deviceId, epoch: data.epoch, tabId: data.tabId, conversationUrl: data.conversationUrl,
@@ -91,6 +93,7 @@ async function waitForResult(context: Context, data: Receipt): Promise<MediaAsse
     if (poll.state === "done") {
       const result = poll.result;
       if (!result?.ok) throw new Error(result?.error ?? "Muse chưa trả kết quả hợp lệ");
+      if (mediaType === "video" && result.videoResultProtocol !== 1) throw new Error("Video không có bằng chứng giao thức kết quả.");
       if (result.partial) { await pause(context); continue; }
       const evidence = result.receipt;
       if (evidence?.requestId !== data.requestId || evidence.requestCode !== data.requestCode || !evidence.sentTurnMatchesRequestId
@@ -100,11 +103,14 @@ async function waitForResult(context: Context, data: Receipt): Promise<MediaAsse
       if (!items.length || items.length > 16 || expected !== items.length || new Set(items.map(item => item.id)).size !== items.length) throw new Error("Manifest ảnh chưa đầy đủ");
       const assets: MediaAsset[] = [];
       for (const item of items) {
-        if (!/^data:image\/(?:png|jpeg|webp);base64,/.test(item.url) || item.url.length > 140 * 1024 * 1024) throw new Error("Extension phải trả byte ảnh thật");
+        const pattern = mediaType === "image" ? /^data:image\/(?:png|jpeg|webp);base64,/ : /^data:video\/(?:mp4|webm|quicktime);base64,/;
+        if (!pattern.test(item.url) || item.url.length > 140 * 1024 * 1024) throw new Error("Extension phải trả byte media thật, đúng loại kết quả.");
         const bytes = Buffer.from(item.url.slice(item.url.indexOf(",") + 1), "base64");
-        const info = await new context.tool.image(bytes).metadata();
-        if (!info.width || !info.height) throw new Error("Ảnh chưa giải mã được");
-        assets.push({ type: "base64", mediaType: "image", data: item.url, mimeType: item.url.slice(5, item.url.indexOf(";")) });
+        if (mediaType === "image") {
+          const info = await new context.tool.image(bytes).metadata();
+          if (!info.width || !info.height) throw new Error("Ảnh chưa giải mã được");
+        } else if (!(bytes.length > 12 && (bytes.subarray(4, 8).toString() === "ftyp" || bytes.readUInt32BE(0) === 0x1a45dfa3))) throw new Error("Kết quả chưa phải file video MP4/WebM.");
+        assets.push({ type: "base64", mediaType, data: item.url, mimeType: item.url.slice(5, item.url.indexOf(";")) });
       }
       await context.saveTaskData?.({ ...data, phase: "received" });
       return assets;
@@ -113,16 +119,16 @@ async function waitForResult(context: Context, data: Receipt): Promise<MediaAsse
   }
 }
 
-export default {
-  id: "museChrome", label: "Muse · Chrome", icon: "", version: "0.1.0", rules,
-  readme: "Sinh ảnh qua Chrome trên máy này, máy khác hoặc VM. Ghép browser trong mục Chrome Connect, chọn tab Muse rồi chọn model tại website. Chỉ ACK sau khi Toonflow lưu đủ file. Cần relay và Toonflow standalone; không dùng API Key của Muse.",
-  models: [{ id: "museImage", label: "Muse · model đang chọn trên tab", type: "image", mode: ["text", "singleImage", "multiReference"] }],
-  async generateImage(request: ImageRequest): Promise<MediaAsset[]> {
-    if (!this.taskId || !this.saveTaskData) throw new Error("Chrome cần task bền vững của Toonflow");
-    if (request.mask) throw new Error("Muse Chrome chưa hỗ trợ gửi mask chỉnh sửa; dùng tác vụ ảnh với tham chiếu thông thường");
-    const deviceId = this.config.deviceId.trim(), epoch = this.config.epoch.trim(), tabId = Number(this.config.tabId);
+async function submit(context: Context, request: ImageRequest | VideoRequest, mediaType: "image" | "video"): Promise<MediaAsset[]> {
+    if (!context.taskId || !context.saveTaskData) throw new Error("Chrome cần task bền vững của Toonflow");
+    if ("mask" in request && request.mask) throw new Error("Muse Chrome chưa hỗ trợ gửi mask chỉnh sửa; dùng tác vụ ảnh với tham chiếu thông thường");
+    if (mediaType === "video") {
+      if (("videos" in request && request.videos?.length) || ("audios" in request && request.audios?.length) || ("firstFrame" in request && request.firstFrame) || ("lastFrame" in request && request.lastFrame)) throw new Error("Muse Chrome nhận văn bản và ảnh tham chiếu; dùng model hỗ trợ để chạy khung đầu/cuối hoặc nối dài.");
+      await context.tool.ffmpeg();
+    }
+    const deviceId = context.config.deviceId.trim(), epoch = context.config.epoch.trim(), tabId = Number(context.config.tabId);
     if (![deviceId, epoch].every(id => /^[a-f0-9-]{36}$/i.test(id)) || !Number.isSafeInteger(tabId) || tabId < 0) throw new Error("Chọn Chrome và tab Muse trong Chrome Connect");
-    const conversationUrl = muse(this.config.conversationUrl.trim()).href;
+    const conversationUrl = muse(context.config.conversationUrl.trim()).href;
     if ((request.images?.length ?? 0) > 8) throw new Error("Tối đa 8 ảnh tham chiếu");
     const referenceImages = (request.images ?? []).map(image => {
       if (image.type !== "base64" || !image.mimeType.startsWith("image/")) throw new Error("Ảnh tham chiếu phải được Toonflow đọc thành byte trước khi gửi");
@@ -130,18 +136,25 @@ export default {
       return `data:${image.mimeType};base64,${image.data}`;
     });
     if (referenceImages.join("").length > 32 * 1024 * 1024) throw new Error("Tổng ảnh tham chiếu vượt 24 MB");
-    const requestCode = `TF-${this.taskId}`;
+    const requestCode = `TF-${context.taskId}`;
     const input = {
-      type: "MUSEFLOW_JOB_START", requestId: this.taskId, requestCode, provider: "muse", mediaType: "image",
-      prompt: `${request.prompt}\n[MOOZ_REQUEST:${requestCode}]\nMã đối chiếu không phải nội dung ảnh; không vẽ mã lên ảnh.`,
+      type: "MUSEFLOW_JOB_START", requestId: context.taskId, requestCode, provider: "muse", mediaType,
+      prompt: `${request.prompt}\n[MOOZ_REQUEST:${requestCode}]\nMã đối chiếu không phải nội dung media; không vẽ mã lên kết quả.`,
       referenceImages, chatTarget: { tabId, url: conversationUrl }, dispatchProtocol: 1,
       size: request.ratio ?? "1:1",
     };
-    const data: Receipt = { requestId: this.taskId, requestCode, relayUrl: relayUrl(this), deviceId, epoch, tabId, conversationUrl,
-      request: input, fingerprint: String(this.tool.hash(JSON.stringify(input))), phase: "prepared" };
-    await this.saveTaskData(data);
-    return waitForResult(this, data);
-  },
+    const data: Receipt = { requestId: context.taskId, requestCode, relayUrl: relayUrl(context), deviceId, epoch, tabId, conversationUrl,
+      request: input, fingerprint: context.tool.sha256(JSON.stringify(input)), phase: "prepared" };
+    await context.saveTaskData(data);
+    return waitForResult(context, data);
+}
+
+export default {
+  id: "museChrome", label: "Muse · Chrome", icon: "", version: "0.2.0", rules,
+  readme: "Sinh ảnh và video qua Chrome trên máy này, máy khác hoặc VM. Ghép browser trong mục Chrome Connect, chọn tab Muse rồi chọn model tại website. Chỉ ACK sau khi Toonflow lưu đủ file. Cần relay và Toonflow standalone; không dùng API Key của Muse.",
+  models: [{ id: "museImage", label: "Muse · model đang chọn trên tab", type: "image", mode: ["text", "singleImage", "multiReference"] }, { id: "museVideo", label: "Muse · Video trên Chrome", type: "video", mode: ["text", ["imageReference:8"]] }],
+  async generateImage(request: ImageRequest): Promise<MediaAsset[]> { return submit(this, request, "image"); },
+  async generateVideo(request: VideoRequest): Promise<MediaAsset[]> { return submit(this, request, "video"); },
   async resumeTask(data: ProviderTaskData): Promise<MediaAsset[]> { return waitForResult(this, receipt(this, data)); },
   async acknowledgeTask(input: ProviderTaskData) {
     const data = receipt(this, input);

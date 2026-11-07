@@ -38,7 +38,8 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "vite": "^8.2.2",
     "eventsource-parser": "3.1.1",
-    "zod": "^4.6.2"
+    "zod": "^4.6.2",
+    "@toonflow/i18n": "workspace:*"
   },
   "devDependencies": {
     "@form-create/element-ui": "^3",

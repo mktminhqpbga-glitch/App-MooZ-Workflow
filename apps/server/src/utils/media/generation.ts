@@ -8,6 +8,7 @@ import conf from "@/utils/conf";
 import { getAccountProvider } from "@/utils/ai/provider";
 import { getMediaProvider, listMediaProviders, loadMediaProviderSource } from "@/utils/media/provider";
 import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
+import { createWorkspaceFfmpeg } from "@/utils/ffmpeg";
 import { beginGeneration, getProviderPrice } from "@/utils/media/billing";
 import { detectMimeType, readPriceReference } from "@/utils/media/priceReference";
 import { modelGateway } from "@/utils/multiTenant/gateway";
@@ -252,7 +253,16 @@ export async function generateMedia(
   const checkpoint = task?.checkpoint;
   let submitted = task?.resume === true || !!checkpoint?.providerData || checkpoint?.assetCount !== undefined || !!checkpoint?.files?.length;
   try {
-    return await executeMedia(cwd, mediaType, request, signal, task, () => { submitted = true; });
+    const files = await executeMedia(cwd, mediaType, request, signal, task, () => { submitted = true; });
+    if (mediaType === "video") {
+      const ffmpeg = await createWorkspaceFfmpeg(cwd, signal);
+      for (const file of files) {
+        signal?.throwIfAborted();
+        const info = await new Promise<import("@toonflow/ffmpeg/types").FfprobeData>((resolve, reject) => ffmpeg(file.path).ffprobe((failure, value) => failure ? reject(failure) : resolve(value)));
+        if (!(Number(info.format.duration) > 0) || !info.streams.some(stream => stream.codec_type === "video" && Number(stream.width) > 0 && Number(stream.height) > 0)) throw new Error("Video đã nhận chưa giải mã được hoặc chưa có thời lượng hợp lệ; giữ file để đối chiếu, chưa ACK.");
+      }
+    }
+    return files;
   } catch (cause) {
     // ACT: 仅宿主确认尚未调用供应商的异常证明未提交；供应商错误码不能伪造此证据。
     if (!task?.modelRouteCipher || submitted) throw cause;

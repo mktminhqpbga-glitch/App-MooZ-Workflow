@@ -26,6 +26,7 @@ export async function createApp({
   skillsRoot,
   agentsRoot,
   pluginRevision,
+  chromeRelay = false,
 }: {
   webRoot: string;
   appVersion?: string;
@@ -37,6 +38,7 @@ export async function createApp({
   skillsRoot?: string;
   agentsRoot?: string;
   pluginRevision?: string;
+  chromeRelay?: boolean;
 }) {
   // conf 由下方的路由动态加载，必须先确定整个进程共用的数据目录。
   if (dataDirectory) process.env.TOONFLOW_DATA_DIR = resolve(dataDirectory);
@@ -61,7 +63,7 @@ export async function createApp({
   const { initializeNetwork } = await import("@/utils/network");
   await initializeNetwork();
   setLocaleFallback(() => normalizeLocale((conf.get("settings", {}).ui as { language?: unknown } | undefined)?.language)
-    ?? detectLocale([Intl.DateTimeFormat().resolvedOptions().locale]));
+    ?? "vi");
   if (dataDirectory && toolsRoot)
     await initializePlugins(resolve(dataDirectory, "tools"), toolsRoot, /^[a-z][a-zA-Z0-9]*\.tool\.js$/, pluginRevision);
   if (dataDirectory && nodesRoot) await initializePlugins(resolve(dataDirectory, "nodes"), nodesRoot, /^[a-z][a-zA-Z0-9]*\.umd\.js$/, pluginRevision);
@@ -152,6 +154,11 @@ export async function createApp({
     const body = errorFromCause(err);
     response.status(body.code).json(body);
   });
+
+  if (chromeRelay) {
+    const { startLocalRelay } = await import("@/utils/chromeRelay");
+    await startLocalRelay();
+  }
 
   const { initialize: initializeBatch } = await import("@/utils/batch");
   await initializeBatch();

@@ -3,9 +3,11 @@
     <el-collapse-item :title="translate('Chrome Connect · Muse, máy khác và VM')" name="chrome">
       <el-button :loading="downloading" @click="downloadExtension">{{ translate("Tải extension Chrome Connect (.zip)") }}</el-button>
       <p>{{ translate("Giải nén ZIP, mở chrome://extensions, bật Chế độ nhà phát triển và chọn Tải tiện ích đã giải nén. Áp dụng cho máy này, máy khác và VM.") }}</p>
+      <el-alert v-if="localStatus?.state === 'ready'" :title="`Relay cục bộ đã sẵn sàng: ${localStatus.url}. Không cần chạy dịch vụ riêng.`" type="success" :closable="false" />
+      <el-alert v-if="localStatus?.state === 'error'" :title="localStatus.message" type="warning" :closable="false" />
       <el-form labelPosition="top" @submit.prevent>
         <el-form-item :label="translate('Địa chỉ relay')"><el-input v-model="relayUrl" placeholder="https://your-relay.onrender.com" /></el-form-item>
-        <el-form-item :label="translate('Relay controller token')"><el-input v-model="controllerToken" type="password" showPassword autocomplete="off" /></el-form-item>
+        <el-form-item :label="translate('Khóa điều khiển relay')"><el-input v-model="controllerToken" type="password" showPassword autocomplete="off" /></el-form-item>
         <el-button :loading="busy" @click="saveRelay">{{ translate('Lưu kết nối relay') }}</el-button>
         <el-divider />
         <el-form-item :label="translate('Tên Chrome cần ghép')"><el-input v-model="label" :placeholder="translate('Ví dụ: Chrome máy chính hoặc VM')" /></el-form-item>
@@ -34,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import axios from "axios";
 import { ElMessage } from "element-plus";
 import { translate } from "@toonflow/i18n/vue";
@@ -43,6 +45,8 @@ import { settings, saveSettings } from "@/stores/settings";
 
 type Tab = { id: number; title?: string; url: string };
 type Device = { deviceId: string; epoch: string; label: string; tabs: Tab[] };
+const localStatus = ref<{ state: string; url?: string; message?: string }>();
+onMounted(async () => { try { const { data } = await axios.get("/api/chrome/status", { headers: { "x-toonflow-workspace": "1" } }); localStatus.value = data.data; } catch { /* Connection details below retain the exact request errors. */ } });
 const configs = settings.value.mediaProviderConfigs as Record<string, Record<string, string>> | undefined;
 const existing = configs?.museChrome;
 const relayUrl = ref(existing?.relayUrl ?? "http://127.0.0.1:4176");

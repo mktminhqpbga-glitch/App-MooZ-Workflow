@@ -161,6 +161,7 @@ async function start() {
     if (typeof hash !== "string" || !hash) throw new Error(t`应用构建标识缺失，无法同步内置插件`);
     const app = await createApp({
       webRoot: resolve(PATHS.VIEWS_FOLDER, "mainview"),
+      chromeRelay: true,
       appVersion: typeof version === "string" ? version : "",
       dataDirectory,
       toolsRoot: resolve(PATHS.VIEWS_FOLDER, "../tools"),

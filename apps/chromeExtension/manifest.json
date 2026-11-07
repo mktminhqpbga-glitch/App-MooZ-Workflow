@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Toonflow Chrome Connect",
-  "version": "0.1.0",
-  "description": "Gh\u00e9p Chrome v\u1edbi Toonflow qua relay \u0111\u1ec3 t\u1ea1o \u1ea3nh tr\u00ean tab Muse.",
+  "version": "0.2.0",
+  "description": "Ghép Chrome với MooZ/Toonflow qua relay để tạo ảnh và video trên tab Muse.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",

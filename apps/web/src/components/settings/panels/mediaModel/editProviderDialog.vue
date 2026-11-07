@@ -61,6 +61,7 @@
 </template>
 
 <script setup lang="ts">
+import { translateUiRules } from "@toonflow/i18n/rules";
 import { translate } from "@toonflow/i18n/vue";
 
 import axios from "axios";
@@ -112,7 +113,7 @@ watch(visible, isVisible => {
   modelEditorVisible.value = false;
   editingModelIndex.value = undefined;
   const configs = settings.value.mediaProviderConfigs as Record<string, Record<string, unknown>> | undefined;
-  formRules.value = formCreate.copyRules(provider?.rules ?? []);
+  formRules.value = translateUiRules(formCreate.copyRules(provider?.rules ?? []));
   formValues.value = structuredClone(toRaw((provider && configs?.[provider.id]) ?? {}));
   revision.value = provider?.revision ?? "";
   models.value = JSON.parse(JSON.stringify(provider?.models ?? []));

@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { dirname, join, extname } from "node:path";
-import { mkdir, readFile, writeFile, writeAtomic, rename, stat, lstat } from "@toonflow/file";
+import { mkdir, readFile, writeFile, writeAtomic } from "@toonflow/file";
 import type { MediaGenerationRequest, MediaModel } from "@toonflow/tools-scaffold/runtime";
 import conf from "@/utils/conf";
 import { getMediaProvider } from "@/utils/media/provider";
 import { listMediaModels, readReference } from "@/utils/media/generation";
 import * as mediaTasks from "@/utils/media/tasks";
 import { resolveWorkspacePath } from "@/utils/workspace/files";
-import { prepareWorkspaceFfmpeg } from "@/utils/ffmpeg";
+import { mergeVideo } from "@/utils/media/render";
 import { batchInputSchema, planBatch, type BatchInput, type BatchView, type BatchJob } from "./composer";
 
 type BatchRecord = BatchView & { providerFingerprint: string; inputHashes: Record<string, string> };
@@ -40,6 +40,11 @@ async function fingerprint(input: BatchInput) {
 }
 function requestMode(input: BatchInput, model: MediaModel, referenceCount: number): MediaGenerationRequest["mode"] {
   const modes: unknown[] = Array.isArray(model.mode) ? model.mode : ["text"];
+  if (input.mediaType === "image") {
+    if (input.mode === "text" && modes.includes("text")) return undefined;
+    if (input.mode === "images" && (modes.includes("multiReference") || referenceCount === 1 && modes.includes("singleImage"))) return undefined;
+    return fail("Model ảnh không hỗ trợ đầu vào đã chọn.");
+  }
   if (input.mode === "text" && modes.includes("text")) return "text";
   if (input.mode === "images") {
     if (referenceCount === 1 && modes.includes("singleImage")) return "singleImage";
@@ -62,8 +67,8 @@ function requestMode(input: BatchInput, model: MediaModel, referenceCount: numbe
 export async function preview(raw: unknown, directory: string) {
   const input = batchInputSchema.parse(raw);
   const jobs = planBatch(input);
-  const model = (await listMediaModels()).find(model => model.type === "video" && model.providerId === input.providerId && model.modelId === input.modelId);
-  if (!model) fail("Chọn model video đã cài trong Cài đặt → Model đa phương tiện.");
+  const model = (await listMediaModels()).find(model => model.type === input.mediaType && model.providerId === input.providerId && model.modelId === input.modelId);
+  if (!model) fail("Chọn model đã cài trong Cài đặt → Model đa phương tiện.");
   for (const job of jobs) requestMode(input, model, job.references.length);
   if (input.duration !== undefined || input.resolution !== undefined) {
     if (model.durationResolutionMap?.length && !model.durationResolutionMap.some(option =>
@@ -95,7 +100,7 @@ export async function initialize() {
     try {
       const { path } = await resolveWorkspacePath(location.directory, `batchProjects/${location.id}/batch.json`);
       const batch: BatchRecord = JSON.parse(await readFile(path, "utf8"));
-      batchInputSchema.parse(batch.input);
+      batch.input = batchInputSchema.parse(batch.input);
       if (batch.id !== location.id || batch.directory !== location.directory || !Array.isArray(batch.jobs)
         || batch.jobs.length > 100 || batch.jobs.some(job => !Array.isArray(job.clips) || job.clips.length > 12 || job.clips.some(clip => !/^[0-9a-f-]{36}$/i.test(clip.taskId)))) fail("Dữ liệu batch bị thay đổi hoặc không hợp lệ.");
       batches.set(batch.id, batch);
@@ -164,57 +169,14 @@ export async function selectClip(directory: string, id: string, jobId: string, s
   await save(batch);
   return view(batch);
 }
-async function runProcess(command: string[]) {
-  const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-  if (code !== 0) throw new Error(`FFmpeg: ${stderr.slice(-2000)}`);
-  return stdout;
-}
 async function assemble(batch: BatchRecord, job: BatchJob) {
-  const tools = await prepareWorkspaceFfmpeg();
-  const output = `batchProjects/${batch.id}/${job.id}.mp4`;
-  const destination = await resolveWorkspacePath(batch.directory, output, true);
-  async function probe(path: string) {
-    return JSON.parse(await runProcess([tools.ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", path])) as { streams: { codec_type: string }[]; format: { duration: string } };
-  }
-  // Final rename is the commit point. Recover a completed export after a crash.
-  const exists = await lstat(destination.path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
-  if (exists?.isSymbolicLink()) fail("File xuất không được là liên kết.");
-  if (!exists) {
-    const args = [tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"];
-    const details: { duration: number; audio: boolean }[] = [];
-    for (const clip of job.clips) {
-      if (!clip.outputs?.length) fail("Thiếu clip, chưa ghép thành phẩm.");
-      const selected = clip.outputs.length === 1 ? clip.outputs[0] : clip.outputs.find(output => output.path === clip.selectedPath);
-      if (!selected) fail("Một cảnh trả nhiều clip; chọn clip dùng để ghép trong hàng đợi. Tất cả kết quả đã được giữ lại.");
-      const { path } = await resolveWorkspacePath(batch.directory, selected.path);
-      const info = await probe(path);
-      const duration = Number(info.format.duration);
-      if (!info.streams.some(stream => stream.codec_type === "video") || !Number.isFinite(duration) || duration <= 0) fail("Clip không phải video có thời lượng hợp lệ.");
-      args.push("-i", path);
-      details.push({ duration, audio: info.streams.some(stream => stream.codec_type === "audio") });
-    }
-    const audioIndices = details.map((detail, index) => detail.audio ? index : -1);
-    let nextInput = details.length;
-    for (const [index, detail] of details.entries()) if (!detail.audio) {
-      audioIndices[index] = nextInput++;
-      args.push("-f", "lavfi", "-t", String(detail.duration), "-i", "anullsrc=r=48000:cl=stereo");
-    }
-    const [width, height] = batch.input.ratio === "9:16" ? [720, 1280] : batch.input.ratio === "1:1" ? [720, 720] : [1280, 720];
-    const filters = details.flatMap((detail, index) => [
-      `[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p,setpts=PTS-STARTPTS[v${index}]`,
-      `[${audioIndices[index]}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=duration=${detail.duration},asetpts=PTS-STARTPTS[a${index}]`,
-    ]);
-    filters.push(details.map((_, index) => `[v${index}][a${index}]`).join("") + `concat=n=${details.length}:v=1:a=1[v][a]`);
-    const temporary = destination.path.replace(/\.mp4$/, ".partial.mp4");
-    await runProcess([...args, "-filter_complex", filters.join(";"), "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", temporary]);
-    const info = await probe(temporary);
-    if (!info.streams.some(stream => stream.codec_type === "video") || Number(info.format.duration) <= 0 || (await stat(temporary)).size === 0) fail("MP4 xuất chưa hợp lệ.");
-    await rename(temporary, destination.path);
-  }
-  const info = await probe(destination.path);
-  if (!info.streams.some(stream => stream.codec_type === "video") || !(Number(info.format.duration) > 0)) fail("MP4 đã lưu không hợp lệ.");
-  job.output = { path: output, mimeType: "video/mp4" };
+  const clips = job.clips.map(clip => {
+    if (!clip.outputs?.length) return fail("Thiếu clip, chưa ghép thành phẩm.");
+    const selected = clip.outputs.length === 1 ? clip.outputs[0] : clip.outputs.find(output => output.path === clip.selectedPath);
+    if (!selected) return fail("Một cảnh trả nhiều clip; chọn clip dùng để ghép trong hàng đợi. Tất cả kết quả đã được giữ lại.");
+    return selected;
+  });
+  job.output = await mergeVideo(batch.directory, clips, `batchProjects/${batch.id}/${job.id}.mp4`, batch.input.ratio);
   job.state = "succeeded";
   await save(batch);
 }
@@ -223,10 +185,18 @@ async function advance(batch: BatchRecord) {
   if (!job) { batch.running = false; await save(batch); return; }
   if (job.state === "failed") fail(job.error || "Batch đang chờ xử lý lỗi; không tự gửi lại.");
   if (await fingerprint(batch.input) !== batch.providerFingerprint) fail("Cấu hình model/tab đã đổi. Khôi phục cấu hình ban đầu để tiếp tục; tác vụ chưa được gửi lại.", 409);
-  const model = (await listMediaModels()).find(model => model.providerId === batch.input.providerId && model.modelId === batch.input.modelId && model.type === "video");
+  const model = (await listMediaModels()).find(model => model.providerId === batch.input.providerId && model.modelId === batch.input.modelId && model.type === batch.input.mediaType);
   if (!model) fail("Model của đợt này không còn được cài.");
   const clip = job.clips.find(clip => clip.state !== "succeeded");
-  if (!clip) { job.state = "assembling"; await save(batch); await assemble(batch, job); return; }
+  if (!clip) {
+    if (batch.input.mediaType === "image") {
+      job.outputs = job.clips.flatMap(clip => clip.outputs ?? []);
+      if (!job.outputs.length) fail("Chưa lưu được ảnh kết quả.");
+      job.state = "succeeded";
+      await save(batch);
+    } else { job.state = "assembling"; await save(batch); await assemble(batch, job); }
+    return;
+  }
   if (clip.state === "queued") {
     for (const reference of job.references) {
       const { path } = await resolveWorkspacePath(batch.directory, reference.path);
@@ -235,12 +205,16 @@ async function advance(batch: BatchRecord) {
     const mode = requestMode(batch.input, model, job.references.length);
     const request: MediaGenerationRequest = {
       providerId: batch.input.providerId, modelId: batch.input.modelId, mode,
-      prompt: clip.prompt + (job.references.length ? "\nTham chiếu: " + job.references.map((ref, index) => `${ref.tag} = ${ref.role}, file ${index + 1}`).join("; ") : ""),
-      ratio: batch.input.ratio, duration: batch.input.duration, resolution: batch.input.resolution, generateAudio: batch.input.generateAudio,
+      prompt: [clip.prompt, batch.input.commonPrompt, batch.input.negativePrompt ? `Điều cần tránh: ${batch.input.negativePrompt}` : ""].filter(Boolean).join("\n") + (job.references.length ? "\nTham chiếu: " + job.references.map((ref, index) => `${ref.tag} = ${ref.role}, file ${index + 1}`).join("; ") : ""),
+      other: batch.input.other, ratio: batch.input.ratio, duration: batch.input.duration, resolution: batch.input.resolution, generateAudio: batch.input.generateAudio,
       outputDirectory: `batchProjects/${batch.id}/clips`,
       images: job.references.filter(ref => ref.role === "product" || ref.role === "character").map(({ path, mimeType }) => ({ path, mimeType })),
       videos: job.references.filter(ref => ref.role === "sourceVideo").map(({ path, mimeType }) => ({ path, mimeType })),
     };
+    if (batch.input.mediaType === "image") {
+      delete request.mode; delete request.duration; delete request.resolution; delete request.generateAudio; delete request.videos;
+      if (batch.input.size) request.size = batch.input.size;
+    }
     const first = job.references.find(ref => ref.role === "firstFrame");
     const last = job.references.find(ref => ref.role === "lastFrame");
     if (first) {
@@ -256,7 +230,7 @@ async function advance(batch: BatchRecord) {
   if (clip.state === "submitted") {
     if (!clip.request) fail("Thiếu snapshot lượt gửi; giữ tác vụ để đối chiếu.");
     // Starting the same UUID/request is idempotent, including a crash before first dispatch.
-    await mediaTasks.start(batch.directory, clip.taskId, "video", clip.request as unknown as MediaGenerationRequest);
+    await mediaTasks.start(batch.directory, clip.taskId, batch.input.mediaType, clip.request as unknown as MediaGenerationRequest);
   }
   const [status] = await mediaTasks.status(batch.directory, [clip.taskId], true);
   if (!status) fail("Không đọc được tác vụ đã gửi.");
