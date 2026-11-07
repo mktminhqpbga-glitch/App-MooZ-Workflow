@@ -37,6 +37,6 @@ API key nằm trong macOS Keychain. API adapter dùng URLSession trực tiếp; 
 
 ## Thư viện
 
-SwiftUI, AppKit, AVKit, Foundation, Network, Security, ImageIO và SQLite là dependency hệ thống. FFmpeg/ffprobe native xử lý media; script package sao chép dylib đi kèm.
+SwiftUI, AppKit, AVKit, Foundation, Network, Security, ImageIO và SQLite là dependency hệ thống. FFmpeg/ffprobe native xử lý media. Bản Intel Ventura dùng nguồn khóa trong `Tools/media-sources.json`, dựng thư viện media tĩnh với deployment target 13. Script package vẫn kiểm toàn bộ dependency và minOS của binary, từ chối gói vượt target 13 trong CI.
 
 ComponentsKit và MengTo/Spring dùng UIKit iOS, không tương thích app macOS này. Macaw có macOS nhưng đã deprecated; không đưa vào đường render chính. Dùng AppKit/SwiftUI thay thế.

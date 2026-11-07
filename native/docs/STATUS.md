@@ -1,40 +1,50 @@
-# Trạng thái nghiệm thu native
+# Trạng thái nghiệm thu native — 07/11/2026 UTC
 
-Nguồn chuyển từ baseline `5bd7dea` sang Swift. Không dùng số nút/màn hình làm tiêu chí hoàn tất.
+Mục tiêu người dùng đã chốt: app Swift/SwiftUI/AppKit cho **Intel, macOS 13 Ventura+**, giữ Chrome companion riêng. Baseline legacy `5bd7dea` được giữ để tham chiếu. Số màn hình/nút không phải tiêu chí hoàn thành.
 
-## Đã có bằng chứng chạy trên Linux
+## Đã kiểm chứng
 
-- Swift 6.1.3 official container: planner, SQLite reopen, queue busy, mất response/ACK, partial và cooldown.
-- Tab/device/session/chat, nonce đúng/sai, permission tồn tại qua restart và không cấp lại.
-- FFmpeg tạo clip thật đỏ/xanh, ghép đúng thứ tự, kiểm pixel/thời lượng, cắt + nhạc + SRT và giải mã toàn bộ H264/AAC.
-- Companion native tạo riêng, kiểm cú pháp JavaScript; extension cũ không bị ghi đè.
+[GitHub Actions run 42330304806](https://github.com/mktminhqpbga-glitch/App-MooZ-Workflow/actions/runs/42330304806), commit `affe689`: **PASS** cả hai job native và companion.
 
-Kết quả cụ thể ghi ở cuối tài liệu khi chốt. Linux không type-check code trong `#if os(macOS)`.
+- **26 XCTest** trên Swift/macOS; cùng 26 ca cũng PASS trong container Swift 6.1.3/Linux. Có HTTP fixture API, planner/role/alias, snapshot bất biến, SQLite reopen, busy/partial/unknown/mất ACK và quyền gửi bền vững.
+- **5 kiểm thử đóng gói**: từ chối SQLite Homebrew/host rpath ở executable chính, từ chối minOS cao hơn target và cho phép runtime Swift hệ thống. Đây là fixture cho bộ kiểm tra; gói thực tế còn được kiểm bằng `otool/lipo/codesign` trên Mac.
+- Worker và Chromium DOM fixture companion PASS: device/session, whitelist START/STATUS/ACK, executeScript array, nonce/receipt, hai ảnh, partial download/retry và START lặp không click hai lần.
+- FFmpeg thật: hai clip đỏ/xanh ghép đúng thứ tự/thời lượng/pixel; trim, phụ đề có pixel chữ, cả nhạc 700 Hz và lời đọc 1100 Hz xuất hiện trong PCM; giải mã toàn bộ H264/AAC. Test luồng hai cảnh qua queue → reopen → MP4 thật.
+- **Bản build cấu hình release đã đóng gói, codesign ad-hoc và mở cửa sổ native trên runner macOS 15 Intel**. Smoke nhập ba PNG thật, kiểm alias gộp ảnh khác nhau, preview sáu job, chạy một job hai cảnh qua provider fixture, kiểm hai submit/hai ACK và khoảng cách ≥10 giây, mở lại SQLite/file, ghép 2 giây, hậu kỳ trim/SRT thành MP4, chụp cửa sổ.
+- Bundle thực tế: `architectures: ["x86_64"]`, `minimumMacOS: "13.0"`, `bundledDylibs: 0`. FFmpeg/libass/x264 và dependency dựng tĩnh từ nguồn đã khóa, cùng deployment target 13. Main app dùng SQLite hệ thống. Gate kiểm mọi executable/dylib; không sửa nhãn plist để che minOS cao hơn.
 
-## Đã viết, cần macOS xác nhận
+Smoke chạy trong kho UUID mới ngay cả khi có `MOOZ_DATA_DIR`, tránh đụng dữ liệu/queue của người dùng. Reopen ở đây là mở kết nối store mới; chưa tự động đóng/mở lại toàn bộ process app.
 
-- SwiftUI/AppKit UI, Canvas kéo/nối, NSTextView chèn thẻ, AVPlayer, Keychain, Network.framework WebSocket.
-- Build release `.app`, bundle FFmpeg/dylib/companion, ad-hoc codesign, ZIP/checksum.
-- Workflow native macOS test/package/launch; smoke dùng file thật, preview 6 job, chạy 1 job hai cảnh, mở lại SQLite, hậu kỳ, MP4 và screenshot. Không phát hành tự động.
+## Lấy bản kiểm thử
 
-## Chưa được nghiệm thu
+Trong run trên, chọn **Artifacts → MooZ-native-macOS-Intel-test-build**. Artifact chứa:
 
-- Build/launch trên Mac hoặc runner macOS thành công, thao tác UI, kéo thả và Save panel.
-- Chrome với tài khoản AI thật: đăng nhập, selector, model/settings đúng lựa chọn, đa ảnh/đa video, reload/mất mạng.
-- Generic bridge video hiện thu một kết quả; chưa nghiệm thu gallery nhiều video. Nếu một cảnh có nhiều clip trong manifest, không tự chọn biến thể để báo hoàn tất; giữ các clip trong Kho cho hậu kỳ.
-- API thật có key/hạn mức; fixture HTTP chỉ kiểm hợp đồng, không xác nhận model còn được cung cấp.
-- Model/chất lượng/resolution trên website chưa có adapter điều khiển đầy đủ như API; không tuyên bố đã áp dụng trên Chrome.
-- Khôi phục thủ công unknown khi mất receipt; nhiều phiên app cùng mở một kho; hiệu năng file lớn.
-- Canvas hiện ảnh đầu vào → cảnh → ghép video, chưa phải engine cho mọi graph tùy ý.
-- Developer ID, notarization và kiểm riêng Intel/Apple Silicon.
+- `MooZ-Native-macOS-x86_64.zip` → `MooZ.app`, đã kèm FFmpeg/ffprobe và companion.
+- `MooZ-Connect-Native.zip` riêng để Load unpacked trong Chrome; `SHA256SUMS.txt` đối chiếu hai ZIP.
+- `native-bundle-info.json`, `native-smoke.json`, screenshot `native-smoke.png` và MP4 thật `native-smoke-final.mp4`.
 
-Không gọi đây là bản phát hành hoàn chỉnh trước khi các gate thực tế liên quan đạt. Không đủ ảnh LibLib trong checkout để đối chiếu từng chi tiết tham chiếu cũ.
+GitHub yêu cầu đăng nhập để tải artifact. Đây là **bản kiểm thử ad-hoc**, chưa phát hành public, chưa Developer ID/notarization. Không cần cài Node/Swift/Homebrew để chạy app đóng gói.
 
-## Bằng chứng ngày 06/11/2026 UTC
+## Lỗi đã tái hiện và sửa
 
-- `swift test -j 4`: 23 XCTest PASS trên Swift 6.1.3/Linux, gồm luồng nhập file → snapshot → queue hai cảnh → restart → lưu clip → MP4 ghép thật.
-- `node native/Tests/companion.browser.cjs`: PASS DOM fixture, hai ảnh, partial/retry, nonce/receipt, START lặp không gửi hai lần, STATUS đúng ID và ACK.
-- `node native/Tests/companion-worker.cjs`: PASS worker fixture, install/session identity, whitelist START/STATUS/ACK và response array của executeScript.
-- Đã tái hiện rồi sửa lỗi ACK ghi đè manifest mới bằng job cũ, lỗi health đọc array thành object, và thiếu whitelist message mới trong worker.
-- Chưa có bằng chứng macOS: auto-review từ chối `git push -u origin feat/native-macos` vì chưa có ủy quyền cụ thể xuất mã nguồn lên remote. Không thử đường vòng; chưa đẩy branch, chưa chạy CI, chưa có `.app` được xác nhận.
-- Workflow hiện chuẩn bị bản kiểm thử Intel. Swift source target 13+, nhưng minOS trong gói sẽ tăng nếu FFmpeg/dylib yêu cầu mới hơn; script suy ra từ load commands, không gắn nhãn tương thích 13 giả.
+- SwiftUI property wrapper khai báo nhiều biến và `Dictionary.keys()` làm build Mac lỗi.
+- Kế hoạch bị xóa bởi callback giao diện khi nạp/lưu dự án; nay giữ snapshot draft của preview, bỏ qua hydration không đổi và từ chối enqueue khi nội dung đã thay.
+- Cooldown từng tính từ trước lúc chờ ACK. Test ACK chậm tái hiện khoảng cách <10 giây; nay lấy đồng hồ sau ACK thành công.
+- ACK lỗi từng có thể ghi đè manifest mới bằng job cũ; nay tải lại trạng thái trước khi cập nhật.
+- Giới hạn 200 từng tính cả job đã hoàn tất; nay chỉ giới hạn job đang hoạt động, test giữ lịch sử + nhận đủ 200 job mới.
+- Health của Chrome đọc response array sai và worker thiếu whitelist message mới; fixture khớp hợp đồng thật của `executeScript`.
+- FFmpeg thiếu libass/lavfi; gói Homebrew có minOS 15; rpath host có thể che thiếu thư viện. Nay dựng nguồn target 13, kiểm capability/load commands cả executable chính, dùng SQLite hệ thống và cấm host rpath.
+
+## Cần nghiệm thu tiếp
+
+- **Chạy trên máy Intel thật đang cài Ventura 13**. Build/launch trên runner 15 và kiểm binary target 13 là bằng chứng tương thích tĩnh, chưa thay cho lượt chạy này.
+- Thao tác người dùng bằng chuột/bàn phím: kéo nối Canvas, kéo ảnh vào prompt, Save panel. Smoke gọi ViewModel trong app thật, không tự động thao tác tất cả control.
+- Chrome với tài khoản AI thật: selector/upload, model/settings, ảnh/video nhiều biến thể, reload/mất mạng. Fixture không xác nhận website hiện tại hoặc tài khoản đăng nhập.
+- Generic bridge video hiện thu một kết quả; gallery nhiều video chưa nghiệm thu. Nếu một scene có nhiều clip, giữ clip trong Kho, không tự chọn biến thể để báo xong.
+- Model/chất lượng/resolution trên website chưa được adapter điều khiển đầy đủ như API; cần chọn trên tab và kiểm thực tế.
+- API thật có key/hạn mức và model hiện được cung cấp; HTTP fixture chỉ kiểm hợp đồng.
+- UI khôi phục thủ công unknown khi mất receipt, nhiều phiên app cùng mở một kho và hiệu năng dữ liệu lớn.
+- Canvas hiện mô tả ảnh đầu vào → cảnh → ghép; chưa là engine cho mọi graph tùy ý. Không đủ ảnh LibLib trong checkout để xác nhận khớp từng chi tiết.
+- Developer ID/notarization và bản Apple Silicon.
+
+Không gọi đây là app đã nghiệm thu toàn bộ luồng AI thật hoặc bản phát hành chính thức. Người dùng đã cho phép push `feat/native-macos`; branch được đẩy để chạy CI, không merge main hay publish release.

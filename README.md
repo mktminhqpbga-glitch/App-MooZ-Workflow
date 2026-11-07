@@ -4,16 +4,9 @@ Hướng phát triển chính là app Swift/SwiftUI/AppKit cho macOS 13+: chọn
 
 App không chạy HTML/CSS/JavaScript, Electron hoặc WebView. MooZ Connect Native là extension Chrome riêng.
 
-```sh
-# Trên Mac có Xcode/Command Line Tools và Swift 6+
-brew install ffmpeg-full
-export PATH="$(brew --prefix ffmpeg-full)/bin:$PATH"
-make test
-make run
-make package
-```
+Bản kiểm thử hiện hướng đến **Intel, macOS 13 Ventura trở lên**. Workflow [Native macOS](https://github.com/mktminhqpbga-glitch/App-MooZ-Workflow/actions/workflows/native-macos.yml) dựng Swift trên runner macOS 15 Intel với deployment target 13. FFmpeg và các thư viện phụ đề được dựng từ nguồn đã khóa phiên bản/checksum; kiểm tra gói sẽ thất bại nếu binary yêu cầu macOS mới hơn 13.
 
-`make package` tạo `native/artifacts/MooZ.app` và ZIP kiểm thử, kèm FFmpeg/ffprobe native và companion. Đây là bản ad-hoc; chưa có chứng nhận Developer ID/notarization.
+Xem [hướng dẫn native](native/README.md) để tải bản kiểm thử hoặc build từ nguồn. `make package` tạo `native/artifacts/MooZ.app` và ZIP kèm FFmpeg/ffprobe và companion riêng. Đây là bản ad-hoc; chưa có chứng nhận Developer ID/notarization. Người chạy bản đã đóng gói không cần cài Node, Swift hoặc Homebrew.
 
 - [Hướng dẫn native](native/README.md)
 - [Kiến trúc và luồng dữ liệu](native/docs/ARCHITECTURE.md)
