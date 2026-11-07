@@ -88,7 +88,7 @@ final class MediaTests: XCTestCase {
       _ = try await ProcessExecutor.run(
         tools.ffmpeg,
         arguments: [
-          "-v", "error", "-f", "lavfi", "-i", "color=c=\(color):s=96x64:r=24:d=1", "-c:v",
+          "-v", "error", "-f", "lavfi", "-i", "color=c=\(color):s=320x240:r=24:d=1", "-c:v",
           "libx264", "-pix_fmt", "yuv420p", file.path,
         ])
     }
@@ -123,6 +123,41 @@ final class MediaTests: XCTestCase {
     XCTAssertEqual(final.duration, 1.3, accuracy: 0.08)
     XCTAssertTrue(
       final.streams.contains(where: { $0.codec_type == "audio" && $0.codec_name == "aac" }))
+    let captionFrame = try await ProcessExecutor.run(
+      tools.ffmpeg,
+      arguments: [
+        "-v", "error", "-ss", "0.4", "-i", finished.path, "-frames:v", "1", "-f", "rawvideo",
+        "-pix_fmt", "rgb24", "pipe:1",
+      ])
+    let whitePixels = stride(from: 0, to: captionFrame.count - 2, by: 3).filter {
+      captionFrame[$0] > 160 && captionFrame[$0 + 1] > 160 && captionFrame[$0 + 2] > 160
+    }.count
+    XCTAssertGreaterThan(
+      whitePixels, 3,
+      "Subtitles must render visible pixels, not merely produce a successful command")
+    let pcm = try await ProcessExecutor.run(
+      tools.ffmpeg,
+      arguments: [
+        "-v", "error", "-i", finished.path, "-vn", "-ac", "1", "-ar", "48000", "-f", "s16le",
+        "pipe:1",
+      ])
+    let samples = stride(from: 0, to: pcm.count - 1, by: 2).map {
+      Double(Int16(bitPattern: UInt16(pcm[$0]) | UInt16(pcm[$0 + 1]) << 8))
+    }
+    let window = Array(samples.dropFirst(4800).prefix(19200))
+    func amplitude(_ frequency: Double) -> Double {
+      var real = 0.0
+      var imaginary = 0.0
+      for (i, value) in window.enumerated() {
+        let angle = 2 * Double.pi * frequency * Double(i) / 48000
+        real += value * cos(angle)
+        imaginary += value * sin(angle)
+      }
+      return 2 * sqrt(real * real + imaginary * imaginary) / Double(window.count)
+    }
+    XCTAssertGreaterThan(amplitude(700), 100, "The music fixture must be audible")
+    XCTAssertGreaterThan(
+      amplitude(1100), 300, "The voice fixture must remain audible alongside music")
     XCTAssertTrue(FileManager.default.fileExists(atPath: red.path))
   }
 }
