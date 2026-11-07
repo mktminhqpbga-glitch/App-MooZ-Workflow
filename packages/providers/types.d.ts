@@ -44,6 +44,8 @@ type ProviderTaskData = { [key: string]: ProviderTaskValue };
 interface ProviderContext<TConfig = Record<string, unknown>> {
   config: TConfig;
   signal?: AbortSignal;
+  /** Durable host task identity; never generate a replacement ID while resuming. */
+  taskId?: string;
   /** 异步任务接单后立即等待保存；旧宿主缺省此能力，使用可选链调用。 */
   saveTaskData?: (data: ProviderTaskData) => Promise<void>;
   /** 宿主直接注入工具，供应商无需 import；FFmpeg 为按需安装的插件能力。 */
@@ -238,6 +240,8 @@ interface ProviderDefinition<TRules extends readonly ProviderFormRule[] = readon
   generateAudio?: GenerateMedia<AudioRequest, ProviderConfig<TRules>>;
   /** 恢复原任务的等待，结果顺序与原 generate 保持一致；不重复提交已接单阶段。明确失败终态可抛出 code 为 MEDIA_TASK_FAILED 的错误。 */
   resumeTask?: (this: ProviderContext<ProviderConfig<TRules>>, data: ProviderTaskData) => Promise<MediaAsset[]>;
+  /** Called only after all output files and the successful host task are durable. */
+  acknowledgeTask?: (this: ProviderContext<ProviderConfig<TRules>>, data: ProviderTaskData) => Promise<void>;
   /** 可选的供应商媒体预处理；未实现时保持原请求。 */
   processMedia?: (this: ProviderContext<ProviderConfig<TRules>>, request: ImageRequest | VideoRequest | AudioRequest) => Promise<ImageRequest | VideoRequest | AudioRequest>;
 }

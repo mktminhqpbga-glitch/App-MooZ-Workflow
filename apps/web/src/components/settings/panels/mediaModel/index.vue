@@ -1,5 +1,6 @@
 <template>
   <div class="providerList">
+    <chromeConnect />
     <div class="itemList">
       <toonflowProviderCard scope="media" :provider="providers.find(item => item.id === 'toonflow')" />
       <el-card v-for="item in visibleProviders" :key="item.fileName" class="providerItem" shadow="never">
@@ -50,6 +51,7 @@ import type { MediaProvider } from "@toonflow/provider-web/types";
 import { saveSettings } from "@/stores/settings";
 import { invalidateNodeModels } from "@toonflow/nodes-scaffold/nodeAi";
 import toonflowProviderCard from "../../toonflowProviderCard.vue";
+import chromeConnect from "./chromeConnect.vue";
 
 defineProps<{ visible?: boolean }>();
 const mediaProviderDialog = shallowRef<Component>();

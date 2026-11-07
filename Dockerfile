@@ -1,6 +1,7 @@
 FROM oven/bun:1.4.3
 
 WORKDIR /app
+ENV TOONFLOW_SERVER_HOST=0.0.0.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg \

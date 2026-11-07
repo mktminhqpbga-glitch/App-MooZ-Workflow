@@ -1,0 +1,14 @@
+{
+  "name": "@toonflow/chrome-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun src/build.ts",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.32",
+    "fflate": "0.8.3"
+  },
+  "license": "GPL-2.0-or-later"
+}

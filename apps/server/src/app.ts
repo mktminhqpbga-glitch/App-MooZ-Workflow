@@ -13,7 +13,7 @@ import initializePlugins from "@/utils/plugins/initialize";
 import { languageRequest, setLocaleFallback, translateError, translateMessage } from "@/lib/i18n";
 import { detectLocale, normalizeLocale } from "@toonflow/i18n";
 
-const autoInstallProviders = ["apiMart.ts", "metaso.ts", "compshare.ts"];
+const autoInstallProviders = ["apiMart.ts", "metaso.ts", "compshare.ts", "museChrome.ts"];
 
 export async function createApp({
   webRoot,

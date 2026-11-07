@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Toonflow Chrome Connect",
+  "version": "0.1.0",
+  "description": "Gh\u00e9p Chrome v\u1edbi Toonflow qua relay \u0111\u1ec3 t\u1ea1o \u1ea3nh tr\u00ean tab Muse.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://muse.ai/*",
+    "https://*.muse.ai/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Toonflow Chrome Connect",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://muse.ai/*",
+        "https://*.muse.ai/*"
+      ],
+      "js": [
+        "bridge/aiActivity.js",
+        "bridge/composerControls.js",
+        "bridge/museBridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src https: wss: http://127.0.0.1:* ws://127.0.0.1:*"
+  }
+}

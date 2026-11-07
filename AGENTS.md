@@ -1,5 +1,14 @@
 本规范适用于整个仓库。
 
+## Current fork task (user instructions take precedence)
+
+- The user explicitly replaced the old MooZ/Swift implementation with Toonflow and approved developing on Toonflow's original Canvas/stack. Do not restore the previous native Swift app or redesign the Canvas into generic forms.
+- Upstream baseline: HBAI-Ltd/Toonflow-app at `6086cdffceb704a632eca143dd16cd461a78cdac`; import commit `00f03af`. The existing user repository and Git history remain; work is on `feat/native-macos`, despite that branch's historical name. Pushes to this feature branch are authorized. Do not push main or publish a release.
+- Requested feature: Muse image generation through an extension on local Chrome, another computer or a VM, connected via a separate Render WSS relay. See `docs/chromeConnect.md` for implementation and honest acceptance limits.
+- Backup outside the checkout: `/workspace/.backups/App-MooZ-Workflow-20261107T031630Z`, containing a verified full Git bundle and working-tree archive. Never commit that backup, credentials or local runtime data.
+- User confirmed retaining Intel/macOS 13 Ventura and will not upgrade. Upstream desktop currently requires 14+; research a compatible desktop host or official older runtime while preserving Toonflow's Canvas/backend. Do not fake the minimum OS or imply an installer has been verified on Ventura.
+- Respond to this user in Vietnamese. Preserve the upstream coding/file-I/O/auth rules below. Do not add test modules, mocks, fixtures, check scripts or test dependencies; use the existing typecheck/build commands and necessary manual verification.
+
 ## 多租户开发规范
 
 - 涉及多租户的设计、开发、修复及迁移时，必须先读取 [.agent/multiTenantContext.md](.agent/multiTenantContext.md) 中的需求共识与交接说明，再遵循 [.agent/multiTenant.md](.agent/multiTenant.md) 中的开发规则；接手时不得仅凭当前局部任务重新解释产品目标。

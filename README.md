@@ -1,3 +1,5 @@
+> **Nhánh Toonflow + Chrome/Muse của App-MooZ-Workflow.** Nguồn Toonflow gốc được giữ, bổ sung provider Chrome, extension và relay Render. Xem [hướng dẫn Chrome Connect và trạng thái nghiệm thu](docs/chromeConnect.md). Bản app Swift trước đây thuộc mã đã backup, không phải bản đang phát triển. Chưa có bản cài macOS mới; upstream desktop hiện yêu cầu macOS 14+.
+
 <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=200&section=header&text=Toonflow&fontSize=90&fontColor=ffffff&animation=fadeIn&fontAlignY=50" alt="Toonflow" width="100%" />
 
 <p>

@@ -14,6 +14,7 @@ import { modelGateway } from "@/utils/multiTenant/gateway";
 
 const maxMediaSize = 100 * 1024 * 1024;
 export type MediaGenerationCheckpoint = {
+  acknowledgement?: "pending" | "complete";
   providerData?: ProviderTaskData;
   assets?: Extract<MediaAsset, { type: "url" }>[];
   assetCount?: number;
@@ -199,16 +200,16 @@ async function prepareRequest<T>(directory: string | undefined, mediaType: "imag
 }
 
 async function configuredProvider(request: MediaGenerationRequest, mediaType: "image" | "video" | "audio", signal?: AbortSignal, directory?: string,
-  saveTaskData?: (data: ProviderTaskData) => Promise<void>, resume = false, modelRouteCipher?: string) {
+  saveTaskData?: (data: ProviderTaskData) => Promise<void>, resume = false, modelRouteCipher?: string, taskId?: string) {
   if (modelGateway.enabled() || modelRouteCipher) {
     const { upstream } = await modelGateway.resolve(mediaType, request.providerId, request.modelId, modelRouteCipher, request);
-    const provider = await loadMediaProviderSource(upstream.source, upstream.config, signal, undefined, directory, saveTaskData, upstream.cloud);
+    const provider = await loadMediaProviderSource(upstream.source, upstream.config, signal, undefined, directory, saveTaskData, upstream.cloud, taskId);
     return { provider, request: { ...request, providerId: provider.id, modelId: upstream.upstreamModelId } };
   }
   const info = await getMediaProvider(request.providerId);
   if (!resume && !info.models.some(model => model.id === request.modelId && model.type === mediaType)) invalid("所选媒体模型不存在或类型不匹配，请重新选择");
   const configurations = record(conf.get("settings", {}).mediaProviderConfigs);
-  const provider = await loadMediaProviderSource(info.source, record(configurations[info.id]), signal, undefined, directory, saveTaskData);
+  const provider = await loadMediaProviderSource(info.source, record(configurations[info.id]), signal, undefined, directory, saveTaskData, false, taskId);
   return { provider, request };
 }
 
@@ -261,6 +262,14 @@ export async function generateMedia(
   }
 }
 
+export async function acknowledgeMediaTask(cwd: string, mediaType: "image" | "video" | "audio", request: MediaGenerationRequest, checkpoint: MediaGenerationCheckpoint, taskId: string) {
+  if (checkpoint.acknowledgement !== "pending") return;
+  if (!checkpoint.providerData) invalid("Missing durable provider receipt for acknowledgement");
+  const { provider } = await configuredProvider(request, mediaType, undefined, cwd, undefined, true, undefined, taskId);
+  if (!provider.acknowledgeTask) invalid("Provider no longer supports acknowledgement; keep the saved files");
+  await provider.acknowledgeTask(checkpoint.providerData);
+}
+
 async function executeMedia(
   cwd: string,
   mediaType: "image" | "video" | "audio",
@@ -294,7 +303,7 @@ async function executeMedia(
   }
   let finish = () => {};
   const resumeAssets = async () => {
-    const { provider } = await configuredProvider(request, mediaType, signal, directory, data => task!.save({ providerData: data }), true, modelRouteCipher);
+    const { provider } = await configuredProvider(request, mediaType, signal, directory, data => task!.save({ providerData: data }), true, modelRouteCipher, task?.taskId);
     if (!checkpoint?.providerData || !provider.resumeTask) invalid("该任务没有可恢复的供应商凭据，不能重新提交生成");
     requireGenerationMode(task);
     finish();
@@ -311,7 +320,11 @@ async function executeMedia(
       assets = checkpoint?.assets ?? await resumeAssets();
     } else {
       const { provider, request: upstreamRequest } = await configuredProvider(request, mediaType, signal, directory,
-        task ? data => task.save({ providerData: data }) : undefined, false, modelRouteCipher);
+        task ? data => task.save({ providerData: data }) : undefined, false, modelRouteCipher, task?.taskId);
+      if (provider.acknowledgeTask) {
+        if (!task || modelRouteCipher) invalid("This browser provider requires a durable standalone media task");
+        await task.save({ acknowledgement: "pending" });
+      }
       const generate = mediaType === "image" ? provider.generateImage : mediaType === "video" ? provider.generateVideo : provider.generateAudio;
       if (typeof generate !== "function") invalid(t`此供应商不支持${translateMessage({ image: "图片", video: "视频", audio: "音频" }[mediaType])}生成`);
       const rules = Array.isArray(provider.rules) ? provider.rules : [];

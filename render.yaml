@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: toonflow-chrome-relay
+    runtime: docker
+    branch: feat/native-macos
+    dockerfilePath: ./apps/chromeRelay/dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: TOONFLOW_RELAY_CONTROLLER_TOKEN
+        generateValue: true
+      - key: TOONFLOW_RELAY_HOST
+        value: 0.0.0.0
+      - key: TOONFLOW_RELAY_DATA_DIR
+        value: /var/data/chromeRelay
+    disk:
+      name: chromeRelayData
+      mountPath: /var/data
+      sizeGB: 1

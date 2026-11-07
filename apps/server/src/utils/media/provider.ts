@@ -536,7 +536,7 @@ export async function deleteMediaProvider(fileName: string, revision: string) {
 }
 
 export async function loadMediaProviderSource(source: string, config: Record<string, unknown> = {}, signal?: AbortSignal, fetchRequest = fetch, cwd?: string,
-  saveTaskData?: (data: ProviderTaskData) => Promise<void>, platformAccount = false) {
+  saveTaskData?: (data: ProviderTaskData) => Promise<void>, platformAccount = false, taskId?: string) {
   signal?.throwIfAborted();
   const { id, value } = parseProvider(source);
   if (platformAccount && id !== "toonflow") invalid("账号媒体供应商 ID 必须为 toonflow", 403);
@@ -582,6 +582,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
     sourceRevision: createHash("sha256").update(source).digest("hex"),
     config: providerConfig,
     signal,
+    taskId,
     saveTaskData: typeof definition.resumeTask === "function" && saveTaskData
       ? async (data: ProviderTaskData) => { await saveTaskData(parseTaskData(data, providerConfig)); } : undefined,
     tool: {
@@ -606,6 +607,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
     ["generateVideo", definition.generateVideo],
     ["generateAudio", definition.generateAudio],
     ["resumeTask", definition.resumeTask],
+    ["acknowledgeTask", definition.acknowledgeTask],
   ] as const) {
     if (!generate) continue;
     Object.assign(provider, { [name]: async (request: ImageRequest | VideoRequest | AudioRequest | ProviderTaskData) => {
@@ -640,7 +642,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
       }, { preconnect: provider.tool.fetch.preconnect }) as typeof fetch };
       const context = { ...provider, tool };
       try {
-        if (name === "resumeTask") return await generate.call(context, parseTaskData(request, providerConfig));
+        if (name === "resumeTask" || name === "acknowledgeTask") return await (generate as NonNullable<Provider["resumeTask"]>).call(context, parseTaskData(request, providerConfig));
         const input = request as ImageRequest | VideoRequest | AudioRequest;
         const prepared = definition.processMedia ? await definition.processMedia.call(context, input) : input;
         // ACT: 预处理沿用原生成类型，在动态分发边界按对应方法收窄请求。

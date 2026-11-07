@@ -9,7 +9,7 @@ import { audioGenerationSchema, imageGenerationSchema, videoGenerationSchema } f
 import { z } from "zod";
 import { error, errorFromCause, success } from "@/lib/responseFormat";
 import conf from "@/utils/conf";
-import { generateMedia, isMediaNotSubmitted, type MediaGenerationCheckpoint } from "@/utils/media/generation";
+import { generateMedia, acknowledgeMediaTask, isMediaNotSubmitted, type MediaGenerationCheckpoint } from "@/utils/media/generation";
 import { lockWorkspaceFiles, resolveWorkspacePath } from "@/utils/workspace/files";
 import { modelGateway } from "@/utils/multiTenant/gateway";
 import { readPriceReference } from "@/utils/media/priceReference";
@@ -22,6 +22,7 @@ const relativePathSchema = z.string().min(1).max(4096).refine(value => !/^[\\/]|
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const mediaSchema = z.strictObject({ path: relativePathSchema, mimeType: z.string().min(1).max(256), mediaType: mediaTypeSchema });
 const checkpointSchema = z.strictObject({
+  acknowledgement: z.enum(["pending", "complete"]).optional(),
   providerData: z.record(z.string(), z.json()).optional(),
   assets: z.array(z.strictObject({
     type: z.literal("url"), mediaType: mediaTypeSchema, url: z.string().regex(/^https?:\/\//i),
@@ -262,6 +263,9 @@ function publicData(task: MediaTask) {
 
 async function snapshot(task: MediaTask, owner?: AuthIdentity | null) {
   const { taskId, state, nodeId, canvasPath, result } = task.record;
+  if (state === "succeeded" && task.record.checkpoint.acknowledgement === "pending") {
+    return { taskId, state: "running" as const, resumable: false, nodeId, canvasPath };
+  }
   return { taskId, state, resumable: await resumable(task), nodeId, canvasPath,
     ...(owner?.role === "user" ? {} : { providerData: publicData(task) }), ...(result ? { result } : {}) };
 }
@@ -364,6 +368,19 @@ async function prepareCharge(task: MediaTask, recoverExisting = false) {
   return true;
 }
 
+async function acknowledgeSaved(task: MediaTask) {
+  const record = task.record;
+  if (record.state !== "succeeded" || record.checkpoint.acknowledgement !== "pending" || !record.request || !record.mediaType) return;
+  try {
+    await acknowledgeMediaTask(record.cwd, record.mediaType, record.request, record.checkpoint, record.taskId);
+    record.checkpoint.acknowledgement = "complete";
+    await persist(task);
+  } catch {
+    // Output is already durable. Polling retries only ACK, never generation.
+    record.checkpoint.acknowledgement = "pending";
+  }
+}
+
 async function execute(task: MediaTask, resume: boolean) {
   const { record } = task;
   try {
@@ -381,6 +398,7 @@ async function execute(task: MediaTask, resume: boolean) {
       record.state = "succeeded";
       record.result = success(files);
       await persist(task);
+      await acknowledgeSaved(task);
     });
   } catch (cause) {
     try {
@@ -516,6 +534,7 @@ export async function status(cwd: string, taskIds: string[], resume = false, own
       const task = await load(cwd, taskId, key, owner);
       if (!task) return { taskId, state: "interrupted" as const, resumable: false, result: error<GeneratedMedia[]>("生成任务不存在", null, 404) };
       if (task.persistenceError) await persist(task);
+      await acknowledgeSaved(task);
       await reconcileCharge(task);
       if (!task.active && task.record.state === "running" && await prepareCharge(task, true)) await launch(task, false);
       if (!task.active && (task.record.state === "running" || (resume && task.record.state === "interrupted"))) {

@@ -6,6 +6,7 @@ import * as providerDebug from "@/utils/media/debug";
 import * as mediaGeneration from "@/utils/media/generation";
 import * as mediaSchemas from "@/utils/media/schemas";
 import * as mediaTasks from "@/utils/media/tasks";
+import * as chromeRelay from "@/utils/chromeRelay";
 import * as mediaProvider from "@/utils/media/provider";
 import * as mediaBilling from "@/utils/media/billing";
 import * as mediaPreview from "@/utils/media/preview";
@@ -47,6 +48,7 @@ export default {
   mediaGeneration,
   mediaSchemas,
   mediaTasks,
+  chromeRelay,
   mediaProvider,
   mediaBilling,
   mediaPreview,
