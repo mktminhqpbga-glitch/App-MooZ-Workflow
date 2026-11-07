@@ -6,7 +6,8 @@
 
 ```sh
 # Cần Xcode/Command Line Tools và FFmpeg có libx264/libass.
-brew install ffmpeg
+brew install ffmpeg-full
+export PATH="$(brew --prefix ffmpeg-full)/bin:$PATH"
 cd native
 swift test -j 4
 swift run MooZ

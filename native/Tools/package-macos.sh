@@ -6,6 +6,7 @@ if [ "$(uname -s)" != Darwin ]; then
 fi
 native_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$native_root"
+python3 "$native_root/Tools/verify_media_tools.py"
 swift test -j 4
 swift build -c release -j 4
 native_bin="$(swift build -c release --show-bin-path)"

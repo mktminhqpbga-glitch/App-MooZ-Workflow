@@ -39,9 +39,16 @@ public struct NativeMediaTools: MediaAssembling, MediaValidating, Sendable {
     let bundled: String? = Bundle.main.resourceURL.map {
       $0.appendingPathComponent("bin/" + name).path
     }
-    let candidates: [String] = [
-      bundled, "/opt/homebrew/bin/" + name, "/usr/local/bin/" + name, "/usr/bin/" + name,
-    ].compactMap { $0 }
+    let searchPath = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(
+      String.init
+    ).filter { $0.hasPrefix("/") }.map {
+      URL(fileURLWithPath: $0).appendingPathComponent(name).path
+    }
+    let candidates: [String] =
+      [bundled].compactMap { $0 } + searchPath + [
+        "/opt/homebrew/opt/ffmpeg-full/bin/" + name, "/usr/local/opt/ffmpeg-full/bin/" + name,
+        "/opt/homebrew/bin/" + name, "/usr/local/bin/" + name, "/usr/bin/" + name,
+      ]
     guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     else {
       throw MooZError.unavailable(

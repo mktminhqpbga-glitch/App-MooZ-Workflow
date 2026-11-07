@@ -6,7 +6,8 @@ App không chạy HTML/CSS/JavaScript, Electron hoặc WebView. MooZ Connect Nat
 
 ```sh
 # Trên Mac có Xcode/Command Line Tools và Swift 6+
-brew install ffmpeg
+brew install ffmpeg-full
+export PATH="$(brew --prefix ffmpeg-full)/bin:$PATH"
 make test
 make run
 make package
