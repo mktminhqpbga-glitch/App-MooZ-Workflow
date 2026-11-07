@@ -1,37 +1,62 @@
 {
-  "name": "mooz-cvn",
-  "version": "0.5.1",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "start:server": "node server.mjs",
-    "build": "node build.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "test:review": "node tests/canvas-review.browser.cjs",
-    "test:browser": "node tests/projects.browser.cjs && node tests/workspace.browser.cjs && node tests/media.browser.cjs && node tests/inline.browser.cjs && node tests/image-tools.browser.cjs",
-    "start:desktop": "electron .",
-    "package:mac": "node scripts/prepare-depth.mjs && electron-builder --mac --x64 --publish never",
-    "package:mac:zip": "node scripts/prepare-depth.mjs && electron-builder --mac zip --x64 --publish never",
-    "package:linux:test": "node scripts/prepare-depth.mjs && electron-builder --linux dir --publish never",
-    "test:local-media": "node tests/local-media.browser.cjs",
-    "test:packaged": "node tests/packaged.browser.cjs",
-    "test:all": "npm test && npm run test:browser && node tests/dock.browser.cjs && node tests/relay-settings.browser.cjs && node tests/depth-video.browser.cjs && node tests/canvas-review.browser.cjs && node tests/queue-flow.browser.cjs && node tests/finishing.browser.cjs && node tests/local-media.browser.cjs && node tests/workflow-tools.browser.cjs && node tests/advanced-tools.browser.cjs && node tests/custom-provider.browser.cjs && node tests/recipe-run.browser.cjs && node tests/exchange-maintenance.browser.cjs && node tests/finishing-extras.browser.cjs && node tests/chatgpt-regression.browser.cjs"
+  "name": "toonflow",
+  "description": "Toonflow 是一款 AI 短剧漫剧工具，能够利用 AI 技术将小说自动转化为剧本，并结合 AI 生成的图片和视频，实现高效的短剧创作。",
+  "author": "HBAI-Ltd <ltlctools@outlook.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/HBAI-Ltd/Toonflow-app#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HBAI-Ltd/Toonflow-app.git"
   },
-  "engines": {
-    "node": ">=22"
+  "bugs": {
+    "url": "https://github.com/HBAI-Ltd/Toonflow-app/issues",
+    "email": "ltlctools@outlook.com"
+  },
+  "type": "module",
+  "packageManager": "bun@1.4.3",
+  "patchedDependencies": {
+    "@vue-flow/core@1.48.2": "patches/vueFlowCore.patch",
+    "@earendil-works/pi-agent-core@0.85.1": "patches/piAgentCore.patch",
+    "@earendil-works/pi-coding-agent@0.85.1": "patches/piCodingAgent.patch"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/multiTenant/*",
+    "packages/nodes/*",
+    "packages/tools/*",
+    "packages/teams/*",
+    "packages/ext/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '@toonflow/web' --filter '@toonflow/server' dev",
+    "dev:web": "bun run --filter '@toonflow/web' dev",
+    "dev:server": "bun run --filter '@toonflow/server' dev",
+    "dev:desktop": "bun run --filter '@toonflow/desktop' dev",
+    "dev:plugins": "NODE_ENV=dev bun run --filter './packages/tools/*' --filter './packages/nodes/*' --filter './packages/ext/*' build",
+    "dev:updateServer": "bun run --filter '@toonflow/updateServer' dev",
+    "start:updateServer": "bun run --filter '@toonflow/updateServer' start",
+    "publish:update": "bun run apps/updateServer/scripts/publish.ts",
+    "start:server": "bun run --cwd apps/server start",
+    "build:server": "bun apps/server/scripts/buildStandalone.ts",
+    "build": "bun run build:tools && bun run build:ext && bun run --filter '@toonflow/web' --filter '@toonflow/server' build",
+    "build:nodes": "bun -e \"import { rmSync } from '@toonflow/file'; import { resolve } from 'node:path'; rmSync(resolve('build/nodes'), { recursive: true, force: true });\" && NODE_ENV=production bun run --filter './packages/nodes/*' build",
+    "create:ext": "bun packages/extScaffold/create.ts",
+    "build:ext": "bun -e \"import { rmSync } from '@toonflow/file'; import { resolve } from 'node:path'; rmSync(resolve('build/ext'), { recursive: true, force: true });\" && NODE_ENV=production bun run --filter './packages/ext/*' build",
+    "build:desktop": "bun run --cwd apps/desktop build",
+    "build:mcp": "bun run --filter '@toonflow/mcp' build",
+    "build:teams": "NODE_ENV=production bun run --filter './packages/teams/*' build",
+    "package:desktop": "bun run --cwd apps/desktop package",
+    "release:desktop": "bun run apps/desktop/scripts/release.ts",
+    "typecheck": "bun run --filter '@toonflow/*' typecheck",
+    "build:tools": "bun -e \"import { rmSync } from '@toonflow/file'; import { resolve } from 'node:path'; rmSync(resolve('build/tools'), { recursive: true, force: true });\" && NODE_ENV=production bun run --filter './packages/tools/*' build"
   },
   "devDependencies": {
-    "electron": "^45.0.0",
-    "electron-builder": "^26.15.3",
-    "onnxruntime-web": "1.22.0",
-    "playwright": "1.58.2"
-  },
-  "dependencies": {
-    "image-size": "2.0.2",
-    "ws": "8.22.0"
-  },
-  "description": "MooZ CVN · Canvas, hàng đợi và hậu kỳ media",
-  "author": "MooZ CVN",
-  "license": "GPL-2.0-or-later",
-  "main": "desktop/main.cjs"
+    "@toonflow/file": "workspace:*",
+    "@types/bun": "^1.4.2",
+    "@types/postcss-pxtorem": "^6.1.0",
+    "postcss": "^8.5.28",
+    "postcss-pxtorem": "^6.1.0",
+    "typescript": "^7.0.2"
+  }
 }

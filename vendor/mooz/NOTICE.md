@@ -1,1 +1,0 @@
-Chrome relay protocol files copied from mktminhqpbga-glitch/app-mooz 0.69.0. Original copyright and GPL-2.0-or-later license retained in LICENSE. These are transport components, not a LibTV integration. Their presence does not establish that a remote broker or Chrome pairing is configured.

@@ -1,9 +1,0 @@
-{
-  "name": "mooz-native-companion-tests",
-  "version": "2.0.0",
-  "private": true,
-  "description": "Test-only dependencies for the separate Chrome companion",
-  "devDependencies": {
-    "playwright": "1.58.2"
-  }
-}

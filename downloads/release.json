@@ -1,8 +1,0 @@
-{
-  "appVersion": "0.5.1",
-  "extensionVersion": "1.9.3",
-  "macIntel": "https://github.com/mktminhqpbga-glitch/App-MooZ-Workflow/releases/latest/download/MooZ-CVN-macOS-Intel.zip",
-  "macIntelDmg": "https://github.com/mktminhqpbga-glitch/App-MooZ-Workflow/releases/latest/download/MooZ-CVN-macOS-Intel.dmg",
-  "extension": "/downloads/MooZ-Connect.zip",
-  "signed": false
-}
