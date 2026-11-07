@@ -30,3 +30,5 @@ Thumbs.db
 *.keychain
 *.keychain-db
 .tmp/
+
+/compat/macIntel/generated/

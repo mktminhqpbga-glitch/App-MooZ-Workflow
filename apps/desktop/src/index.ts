@@ -148,6 +148,9 @@ async function start() {
       splash?.close();
       return;
     }
+    if (process.platform === "darwin" && process.arch === "x64") {
+      process.env.PATH = `${resolve(PATHS.VIEWS_FOLDER, "ffmpeg/darwin-x64")}:${process.env.PATH ?? ""}`;
+    }
     setRuntimeHost("desktop");
     const { createApp } = await import("@toonflow/server/app");
     const { closeBrowsers } = await import("@toonflow/server/browser");

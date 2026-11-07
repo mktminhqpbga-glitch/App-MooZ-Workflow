@@ -1,0 +1,54 @@
+name: Build Intel Ventura app
+on:
+  push:
+    branches: [feat/native-macos]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: venturaIntel-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      appVersion: '2.0.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+      - name: Install official Intel compatibility SDK
+        working-directory: compat/macIntel
+        run: bun install --frozen-lockfile
+      - name: Prepare native components for Ventura
+        run: bun compat/macIntel/prepareNative.ts
+      - name: Build native startup libraries
+        run: bun packages/startup/scripts/buildMac.ts
+      - name: Bundle verified FFmpeg and ffprobe
+        working-directory: apps/server
+        run: |
+          bun -e '
+          import { installFfmpeg } from "@toonflow/ffmpeg";
+          import { resolve } from "node:path";
+          await installFfmpeg(resolve("../../build/desktop/bundledTools"), "github", new AbortController().signal, state => { if (state.phase !== "downloading") console.log(state.phase); });
+          '
+          curl -fL --retry 3 https://raw.githubusercontent.com/eugeneware/ffmpeg-static/b6.1.1/LICENSE -o ../../build/desktop/bundledTools/license.txt
+      - name: Package desktop and extension
+        run: bun run build:desktop
+      - name: Upload installer and extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonflowIntelVentura13
+          path: |
+            build/desktop/artifacts/macX64/
+            build/toonflowChromeConnect.zip
+            LICENSE
+            docs/thirdPartyNotices.md
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeAtomicSync } from "@toonflow/file";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeAtomicSync } from "@toonflow/file";
 import { dirname, resolve } from "node:path";
 import copyDocumentPackages from "../../server/scripts/copyDocumentPackages";
 import copySandboxPackages from "../../server/scripts/copySandboxPackages";
@@ -15,9 +15,10 @@ if (process.argv.length !== 3 || !["build", "dev", "typecheck", "package"].inclu
 }
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+const isMacIntel = isMac && process.arch === "x64";
 // ACT: typecheck 只读取当前源码和已有 SDK 文件，不安装依赖或生成文件。
 if (mode === "typecheck") {
-  await $`${process.execPath} run tsc --project apps/desktop/tsconfig.json`.cwd(projectDir);
+  await $`${process.execPath} run tsc --project ${isMacIntel ? "compat/macIntel/tsconfig.json" : "apps/desktop/tsconfig.json"}`.cwd(projectDir);
   process.exit(0);
 }
 if (!["darwin", "win32", "linux"].includes(process.platform) || !["x64", "arm64"].includes(process.arch)) {
@@ -117,7 +118,10 @@ if (mode === "dev") {
     }
   }
 }
+await $`${process.execPath} run build`.cwd(resolve(projectDir, "apps/chromeExtension"));
 await $`${process.execPath} run build`.cwd(resolve(projectDir, "apps/web"));
+mkdirSync(resolve(projectDir, "build/web/downloads"), { recursive: true });
+copyFileSync(resolve(projectDir, "build/toonflowChromeConnect.zip"), resolve(projectDir, "build/web/downloads/toonflowChromeConnect.zip"));
 await $`${process.execPath} run build`.cwd(resolve(projectDir, "packages/mcp"));
 const agentDirectory = dirname(realpathSync(Bun.resolveSync("@earendil-works/pi-coding-agent", resolve(projectDir, "apps/server"))));
 const photonDirectory = dirname(Bun.resolveSync("@silvia-odwyer/photon-node", agentDirectory));
@@ -126,6 +130,10 @@ rmSync(photonOutput, { recursive: true, force: true });
 cpSync(photonDirectory, photonOutput, { recursive: true });
 await copyDocumentPackages(resolve(projectDir, "build/desktop/node_modules"));
 await copySandboxPackages(resolve(projectDir, "build/desktop/node_modules"));
+if (isMacIntel) {
+  await $`${process.execPath} ${resolve(projectDir, "compat/macIntel/build.ts")} ${mode === "dev" ? "dev" : "build"}`.cwd(projectDir);
+  process.exit(0);
+}
 const cli = resolve(projectDir, "apps/desktop/node_modules/electrobun/bin/electrobun.cjs");
 if (isMac && mode !== "dev") {
   // ACT: 外置 Bun 的 macOS Bundle 身份尚待实机验证，正式构建继续内置；显式开启仅用于验证精简安装包。
