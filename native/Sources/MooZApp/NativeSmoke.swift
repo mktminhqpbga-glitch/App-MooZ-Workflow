@@ -32,6 +32,9 @@
         guard model.ready, let media = model.media else {
           throw MooZError.unavailable("Native startup/media unavailable")
         }
+        guard model.root.lastPathComponent.hasPrefix("mooz-smoke-"),
+          try await model.store.jobs().isEmpty
+        else { throw MooZError.invalid("Smoke tests require a fresh isolated workspace") }
         let output =
           ProcessInfo.processInfo.environment["MOOZ_SMOKE_OUTPUT"].map {
             URL(fileURLWithPath: $0, isDirectory: true)
@@ -83,7 +86,9 @@
         model.sceneText = "Cảnh đỏ\n---\nCảnh xanh"
         await model.plan()
         guard model.preview.count == 6 else {
-          throw MooZError.invalid("Expected six jobs in native preview")
+          throw MooZError.invalid(
+            "Expected six jobs in native preview, got \(model.preview.count); inputs \(model.productIDs.count), copies \(model.draft.copies): \(model.error ?? "no planner error")"
+          )
         }
         // Verify six planned combinations, execute one two-scene job for the launch check.
         model.preview = [model.preview[0]]

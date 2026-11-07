@@ -231,10 +231,10 @@
             "\(model.draft.copies) bản tạo cho mỗi tổ hợp", value: $model.draft.copies, in: 1...10
           ).onChange(of: model.draft.copies) { _ in model.changed() }
           HStack {
-            Button("Xem kế hoạch") { Task { await model.plan() } }
+            Button("Xem kế hoạch") { Task { await model.plan() } }.disabled(model.importing)
             Spacer()
             Button("Xếp \(model.preview.count) tác vụ") { Task { await model.enqueue() } }
-              .buttonStyle(.borderedProminent).disabled(model.preview.isEmpty)
+              .buttonStyle(.borderedProminent).disabled(model.preview.isEmpty || model.importing)
           }
           if !model.preview.isEmpty {
             Text("Xác nhận ảnh của từng tác vụ").font(.headline)
@@ -309,6 +309,9 @@
           Picker(
             "AI", selection: Binding(get: { model.draft.binding.provider }, set: model.setProvider)
           ) {
+            if CommandLine.arguments.contains("--smoke-test") {
+              Text("Fixture kiểm thử").tag("fixture")
+            }
             Text("OpenAI API").tag("openai")
             Text("Google API").tag("google")
             Text("fal · Veo API").tag("fal")

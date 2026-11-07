@@ -3,6 +3,19 @@ import XCTest
 @testable import MooZCore
 
 final class PlannerTests: XCTestCase {
+  func testChromeNeedsPinnedIdentityAndUnsupportedKindsFailBeforeEnqueue() throws {
+    var draft = BatchDraft()
+    draft.prompts = ["Create"]
+    draft.binding = TabBinding(provider: "muse")
+    XCTAssertThrowsError(try BatchPlanner.plan(projectID: "p", draft: draft, assets: []))
+    draft.binding = TabBinding(
+      provider: "muse", deviceID: "d", tabID: 17, epoch: "e",
+      conversationURL: "https://muse.ai/chat/one")
+    XCTAssertEqual(try BatchPlanner.plan(projectID: "p", draft: draft, assets: []).count, 1)
+    draft.binding = TabBinding(provider: "openai")
+    draft.settings.kind = .video
+    XCTAssertThrowsError(try BatchPlanner.plan(projectID: "p", draft: draft, assets: []))
+  }
   func testAliasesIgnoreEmailsEscapesAndCodeButRejectDanglingReferences() throws {
     let references = [Reference("a", role: .product, alias: "anh1")]
     let text = try PromptReferences.compile(

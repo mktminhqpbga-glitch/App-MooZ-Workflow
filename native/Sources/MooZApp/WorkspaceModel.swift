@@ -52,6 +52,8 @@
     private var execution: Task<Void, Never>?
     private var refresh: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    private var previewDraft: BatchDraft?
+    private var restoringProject = false
 
     init(root: URL? = nil) throws {
       self.root =
@@ -109,6 +111,8 @@
       } catch { self.error = error.localizedDescription }
     }
     func selectProject(_ id: String) async {
+      restoringProject = true
+      defer { restoringProject = false }
       do {
         if let current = project { try await persistDraft(currentID: current.id) }
         projects = try await store.projects()
@@ -116,6 +120,7 @@
         project = selected
         draft = selected.draft
         preview = selected.previewJobs ?? []
+        previewDraft = preview.isEmpty ? nil : selected.draft
         previewIndex = 0
         promptText = draft.prompts.joined(separator: "\n\n")
         sceneText = draft.scenePrompts.joined(separator: "\n---\n")
@@ -137,7 +142,6 @@
         if let current = project { try await persistDraft(currentID: current.id) }
         let created = try await store.saveProject(Project(name: name))
         projects = try await store.projects()
-        project = nil
         await selectProject(created.id)
       } catch { self.error = error.localizedDescription }
     }
@@ -172,12 +176,16 @@
       return value
     }
     func changed() {
+      guard !restoringProject else { return }
+      if makeDraft() == previewDraft { return }
       if let project, makeDraft() == project.draft { return }
       preview = []
+      previewDraft = nil
       previewIndex = 0
       scheduleSave()
     }
     func finishingChanged() {
+      guard !restoringProject else { return }
       finishing.videoAssetID = finishVideoID
       finishing.musicAssetID = musicID
       finishing.voiceAssetID = voiceID
@@ -195,8 +203,10 @@
     }
     private func persistDraft(currentID: String) async throws {
       guard project?.id == currentID else { return }
+      let value = makeDraft()
+      let matchingPreview = value == previewDraft ? preview : []
       let saved = try await store.saveDraft(
-        projectID: currentID, draft: makeDraft(), preview: preview, finishing: finishing)
+        projectID: currentID, draft: value, preview: matchingPreview, finishing: finishing)
       if project?.id == currentID { project = saved }
       projects = try await store.projects()
     }
@@ -207,25 +217,37 @@
           throw MooZError.invalid("Còn ảnh chưa đưa vào nhóm thủ công.")
         }
         let value = makeDraft()
-        preview = try BatchPlanner.plan(
-          projectID: project.id, draft: value, assets: assets, existingJobs: jobs.count)
+        let active = try await store.activeJobCount()
+        let planned = try BatchPlanner.plan(
+          projectID: project.id, draft: value, assets: assets, existingJobs: active)
+        previewDraft = value
+        preview = planned
         draft = value
         previewIndex = 0
         error = nil
         notice = "\(preview.count) tác vụ. Chưa gửi AI."
         try await persistDraft(currentID: project.id)
+        if makeDraft() != value {
+          preview = []
+          previewDraft = nil
+        }
       } catch {
         preview = []
+        previewDraft = nil
         self.error = error.localizedDescription
       }
     }
     func enqueue() async {
       do {
         guard !preview.isEmpty else { throw MooZError.invalid("Xem kế hoạch trước khi xếp hàng.") }
+        guard makeDraft() == previewDraft else {
+          throw MooZError.invalid("Bản nháp đã thay đổi. Xem lại kế hoạch trước khi xếp hàng.")
+        }
         let frozen = try preview.map { try CanvasCompiler.compile($0, graph: $0.graph) }
         try await store.enqueue(frozen)
         notice = "Đã chốt \(frozen.count) tác vụ. Bấm Chạy hàng đợi để gửi."
         preview = []
+        previewDraft = nil
         await reloadFilesAndJobs()
         if let id = project?.id { try await persistDraft(currentID: id) }
       } catch { self.error = error.localizedDescription }
@@ -250,7 +272,21 @@
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
-          let bytes = try await Task.detached { try Data(contentsOf: url) }.value
+          let bytes = try await Task.detached {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let limit = 100 * 1024 * 1024
+            var data = Data()
+            while let part = try handle.read(upToCount: min(1024 * 1024, limit - data.count + 1)),
+              !part.isEmpty
+            {
+              data.append(part)
+              guard data.count <= limit else {
+                throw MooZError.invalid("File vượt giới hạn 100 MB.")
+              }
+            }
+            return data
+          }.value
           let mime: String
           switch url.pathExtension.lowercased() {
           case "png": mime = "image/png"

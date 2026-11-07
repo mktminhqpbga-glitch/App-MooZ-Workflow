@@ -87,7 +87,7 @@ public actor GenerationQueue {
     guard !ticking else { return }
     ticking = true
     defer { ticking = false }
-    for var job in try await store.jobs() {
+    for var job in try await store.jobs(activeOnly: true) {
       guard ![.completed, .failed, .stopped].contains(job.state) else { continue }
       if job.state == .readyToAssemble {
         guard let assembler else { continue }

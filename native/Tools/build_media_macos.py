@@ -140,7 +140,7 @@ build('libass', 'configure', ['--enable-static', '--disable-shared', '--disable-
 build('x264', 'configure', ['--enable-static', '--disable-cli', '--enable-pic'])
 build('ffmpeg', 'ffmpeg', ['--arch=x86_64', '--target-os=darwin', '--disable-autodetect',
                           '--enable-static', '--disable-shared', '--disable-debug', '--disable-doc',
-                          '--disable-ffplay', '--disable-network', '--disable-indevs', '--disable-outdevs',
+                          '--disable-ffplay', '--disable-network', '--disable-indevs', '--enable-indev=lavfi', '--disable-outdevs',
                           '--enable-gpl', '--enable-version3', '--enable-libx264', '--enable-libass',
                           '--enable-zlib', '--pkg-config-flags=--static'])
 shutil.copy2(lock_path, prefix / 'share/mooz-media/sources.json')

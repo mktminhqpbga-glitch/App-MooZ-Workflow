@@ -3,6 +3,36 @@ import XCTest
 @testable import MooZCore
 
 final class StorageTests: XCTestCase {
+  func testCompletedHistoryDoesNotConsumeActiveQueueCapacity() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try WorkspaceStore(root: root)
+    let project = try await store.saveProject(Project(name: "History"))
+    var draft = BatchDraft()
+    draft.prompts = ["Old"]
+    var old = try BatchPlanner.plan(projectID: project.id, draft: draft, assets: [])[0]
+    try await store.enqueue([old])
+    let output = try await store.importAsset(
+      data: Self.pixel, name: "old-result.png", mime: "image/png", origin: .result,
+      requestID: old.scenes[0].requestID, itemID: "image")
+    old.state = .completed
+    old.scenes[0].state = .completed
+    old.scenes[0].outputIDs = [output.id]
+    old.scenes[0].expectedItems = 1
+    old.finalAssetID = output.id
+    try await store.updateJob(old)
+    let count = try await store.activeJobCount()
+    XCTAssertEqual(count, 0)
+    draft.prompts = (1...20).map { "New \($0)" }
+    draft.copies = 10
+    let batch = try BatchPlanner.plan(
+      projectID: project.id, draft: draft, assets: [], existingJobs: count)
+    try await store.enqueue(batch)
+    let active = try await store.jobs(activeOnly: true)
+    let history = try await store.jobs()
+    XCTAssertEqual(active.count, 200)
+    XCTAssertEqual(history.count, 201)
+  }
   func testSHA256KnownVectors() {
     XCTAssertEqual(
       ContentHash.sha256(Data()), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

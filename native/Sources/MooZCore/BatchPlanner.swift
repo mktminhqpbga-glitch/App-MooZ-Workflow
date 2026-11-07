@@ -4,11 +4,15 @@ public enum BatchPlanner {
   public static func plan(
     projectID: String, draft: BatchDraft, assets: [Asset], existingJobs: Int = 0
   ) throws -> [Job] {
+    try GenerationCapabilities.validate(draft)
     guard (1...10).contains(draft.copies), (1...50).contains(draft.prompts.count),
       draft.prompts.allSatisfy({
         !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.count <= 20_000
       }),
-      draft.scenePrompts.count <= 12, draft.settings.maxReferences >= 0,
+      draft.scenePrompts.count <= 12,
+      draft.scenePrompts.allSatisfy({
+        !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.count <= 20_000
+      }), draft.settings.maxReferences >= 0,
       !draft.settings.model.isEmpty
     else { throw MooZError.invalid("Prompt, model, số bản tạo hoặc số cảnh không hợp lệ.") }
     guard Set(assets.map(\.id)).count == assets.count else {

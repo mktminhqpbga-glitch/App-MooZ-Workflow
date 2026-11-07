@@ -13,6 +13,6 @@ def names(option):
     return {columns[1] for line in text.splitlines() if len(columns := line.split()) >= 2}
 
 
-if 'subtitles' not in names('-filters') or not {'libx264', 'aac'}.issubset(names('-encoders')):
+if 'subtitles' not in names('-filters') or not {'libx264', 'aac'}.issubset(names('-encoders')) or 'lavfi' not in names('-devices'):
     raise SystemExit('FFmpeg requires subtitles/libass, libx264 and AAC. On Mac use brew install ffmpeg-full and its bin directory in PATH.')
-print('PASS media prerequisites: subtitles/libass, H264 and AAC; ffprobe available.')
+print('PASS media prerequisites: subtitles/libass, H264/AAC, lavfi fixture input and ffprobe.')

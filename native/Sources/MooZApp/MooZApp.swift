@@ -7,8 +7,12 @@
     @Published var error: String?
     init() {
       do {
-        let folder = ProcessInfo.processInfo.environment["MOOZ_DATA_DIR"].map {
+        var folder = ProcessInfo.processInfo.environment["MOOZ_DATA_DIR"].map {
           URL(fileURLWithPath: $0, isDirectory: true)
+        }
+        if CommandLine.arguments.contains("--smoke-test") {
+          folder = (folder ?? FileManager.default.temporaryDirectory).appendingPathComponent(
+            "mooz-smoke-" + UUID().uuidString, isDirectory: true)
         }
         model = try WorkspaceModel(root: folder)
         if CommandLine.arguments.contains("--smoke-test"), let model {

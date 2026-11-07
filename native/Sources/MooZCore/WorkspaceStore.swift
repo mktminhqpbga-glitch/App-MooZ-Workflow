@@ -85,8 +85,24 @@ public actor WorkspaceStore {
     }
   }
   public func assets() throws -> [Asset] { try all(Asset.self, kind: "asset") }
-  public func jobs(projectID: String? = nil) throws -> [Job] {
-    try all(Job.self, kind: "job").filter { projectID == nil || $0.projectID == projectID }.sorted {
+  private let activeJobCondition =
+    "json_extract(payload,'$.state') NOT IN ('completed','failed','stopped')"
+  public func activeJobCount() throws -> Int {
+    Int(
+      try db.rows("SELECT count(*) FROM records WHERE kind='job' AND " + activeJobCondition).first?
+        .first ?? "0") ?? 0
+  }
+  public func jobs(projectID: String? = nil, activeOnly: Bool = false) throws -> [Job] {
+    var query = "SELECT payload FROM records WHERE kind='job'"
+    var values: [String] = []
+    if activeOnly { query += " AND " + activeJobCondition }
+    if let projectID {
+      query += " AND json_extract(payload,'$.projectID')=?"
+      values.append(projectID)
+    }
+    return try db.rows(query, values: values).map {
+      try decoder.decode(Job.self, from: Data($0[0].utf8))
+    }.sorted {
       $0.createdAt < $1.createdAt
     }
   }
@@ -110,7 +126,7 @@ public actor WorkspaceStore {
   }
   public func enqueue(_ jobs: [Job]) throws {
     try db.transaction {
-      guard !jobs.isEmpty, try self.jobs().count + jobs.count <= 200,
+      guard !jobs.isEmpty, try self.activeJobCount() + jobs.count <= 200,
         Set(jobs.map(\.id)).count == jobs.count
       else {
         throw MooZError.invalid("Đợt tác vụ rỗng, trùng ID hoặc vượt 200 job.")
