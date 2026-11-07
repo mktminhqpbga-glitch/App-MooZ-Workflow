@@ -2,7 +2,7 @@
   <teleport to="body">
     <aside
       v-bind="$attrs"
-      v-show="visible"
+      v-show="visible && !props.suspended"
       id="agentPanel"
       class="floatingAgent"
       :class="{ docked, dragging: interaction?.mode === 'move' }"
@@ -49,6 +49,7 @@ import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue
 import { IconLayoutSidebarRight, IconAppWindowBottomRight } from "@tabler/icons-vue";
 import agent from "@/components/agent/index.vue";
 
+const props = defineProps<{ suspended?: boolean }>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ resize: [width: number] }>();
 const docked = ref(false);

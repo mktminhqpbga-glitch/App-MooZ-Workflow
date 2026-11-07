@@ -61,7 +61,7 @@
           <el-table :data="proposal.jobs" maxHeight="420" size="small">
             <el-table-column prop="label" label="Video" minWidth="160" />
             <el-table-column label="Ảnh / vai trò" minWidth="230"><template #default="{ row }"><div v-for="ref in row.references" :key="ref.tag" class="previewReference"><el-image v-if="thumbnails[ref.path]" :src="thumbnails[ref.path]" class="referenceThumbnail" fit="cover" /> {{ ref.tag }} · {{ ref.role }} · {{ ref.path.split('/').at(-1) }}</div><span v-if="!row.references.length">Chỉ văn bản</span></template></el-table-column>
-            <el-table-column label="Cảnh theo thứ tự" minWidth="280"><template #default="{ row }"><p v-for="(scene, index) in row.scenes" :key="index" class="scenePrompt">{{ index + 1 }}. {{ scene }}</p></template></el-table-column>
+            <el-table-column label="Cảnh theo thứ tự" minWidth="280"><template #default="{ row }"><p v-for="(scene, index) in row.scenes" :key="index" class="scenePrompt">{{ Number(index) + 1 }}. {{ scene }}</p></template></el-table-column>
           </el-table>
           <p class="fieldHint">Tạo đợt chưa gửi AI. Bấm Chạy hàng đợi bên dưới để bắt đầu. Số lượt tạo có thể phát sinh phí từ provider của bạn.</p>
         </el-card>
@@ -72,7 +72,7 @@
             <div class="jobHeading"><strong>{{ job.label }}</strong><el-tag :type="job.state === 'succeeded' ? 'success' : job.state === 'failed' ? 'danger' : 'info'">{{ stateLabel(job.state) }}</el-tag></div>
             <p v-if="job.error" class="jobError">{{ job.error }}</p>
             <p class="fieldHint">{{ job.references.map(ref => `${ref.tag} · ${ref.role} · ${ref.path.split('/').at(-1)}`).join(" / ") }}</p>
-            <div class="clipRow"><span v-for="(clip, index) in job.clips" :key="clip.taskId" :title="`${clip.prompt}\n${clip.taskId}`">Cảnh {{ index + 1 }} · {{ stateLabel(clip.state) }}<el-button v-for="output in clip.outputs ?? []" :key="output.path" size="small" text @click="download(output)">Tải clip</el-button><el-select v-if="(clip.outputs?.length ?? 0) > 1" :modelValue="clip.selectedPath" :disabled="batch.running || !!job.output" placeholder="Chọn clip để ghép" @change="selectClip(batch, job.id, index, $event)"><el-option v-for="(output, outputIndex) in clip.outputs" :key="output.path" :label="`Clip ${outputIndex + 1}`" :value="output.path" /></el-select></span></div>
+            <div class="clipRow"><span v-for="(clip, index) in job.clips" :key="clip.taskId" :title="`${clip.prompt}\n${clip.taskId}`">Cảnh {{ Number(index) + 1 }} · {{ stateLabel(clip.state) }}<el-button v-for="output in clip.outputs ?? []" :key="output.path" size="small" text @click="download(output)">Tải clip</el-button><el-select v-if="(clip.outputs?.length ?? 0) > 1" :modelValue="clip.selectedPath" :disabled="batch.running || !!job.output" placeholder="Chọn clip để ghép" @change="selectClip(batch, job.id, index, $event)"><el-option v-for="(output, outputIndex) in clip.outputs" :key="output.path" :label="`Clip ${Number(outputIndex) + 1}`" :value="output.path" /></el-select></span></div>
             <div v-if="job.output" class="outputActions"><el-button type="primary" plain @click="openOutput(job.output)">Xem MP4</el-button><el-button @click="download(job.output)">Tải thành phẩm MP4</el-button></div>
           </article>
         </el-card>
@@ -101,7 +101,7 @@ const modelKey = ref("");
 const models = ref<MediaModel[]>([]);
 const thumbnails = reactive<Record<string, string>>({});
 const videoModels = computed(() => models.value.filter(model => model.type === "video"));
-const keyFor = (model: MediaModel) => `${model.providerId}:${model.modelId}`;
+const keyFor = (model: Pick<MediaModel, "providerId" | "modelId">) => `${model.providerId}:${model.modelId}`;
 const selectedModel = computed(() => videoModels.value.find(model => keyFor(model) === modelKey.value));
 const durations = computed(() => [...new Set(selectedModel.value?.durationResolutionMap?.flatMap(option => option.duration) ?? [])].sort((a, b) => a - b));
 const resolutions = computed(() => [...new Set(selectedModel.value?.durationResolutionMap?.filter(option => !input.duration || option.duration.includes(input.duration)).flatMap(option => option.resolution) ?? [])]);
