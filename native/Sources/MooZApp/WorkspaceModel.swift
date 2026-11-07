@@ -40,7 +40,9 @@
     @Published var rendering = false
     @Published var ready = false
     @Published var finishing = FinishingSettings()
-    @Published var finishVideoID = "", musicID = "", voiceID = ""
+    @Published var finishVideoID = ""
+    @Published var musicID = ""
+    @Published var voiceID = ""
     let store: WorkspaceStore
     let chrome: ChromeSocketServer
     let chromeProvider: ChromeProvider

@@ -10,6 +10,10 @@ actor FixtureProvider: GenerationProvider {
   var output = StorageTests.pixel
   var items: [GeneratedItem]?
   var ackFailures = 0
+  var ackDelay: UInt64 = 0
+  var lastAck: Date?
+  func delayAcknowledgement(_ nanoseconds: UInt64) { ackDelay = nanoseconds }
+  func acknowledgedTime() -> Date? { lastAck }
   func setItems(_ value: [GeneratedItem]) { items = value }
   func failNextAcknowledgement() { ackFailures = 1 }
   func setBusy(_ value: Bool) { busy = value }
@@ -26,16 +30,35 @@ actor FixtureProvider: GenerationProvider {
       expected: items?.count ?? 1, finished: true)
   }
   func acknowledge(_ request: ProviderRequest) async throws {
+    if ackDelay > 0 { try await Task.sleep(nanoseconds: ackDelay) }
     if ackFailures > 0 {
       ackFailures -= 1
       throw MooZError.unavailable("fixture lost ACK response")
     }
     acknowledgements.append(request.scene.requestID)
+    lastAck = Date()
   }
   func counts() -> (Int, Int) { (submissions.count, acknowledgements.count) }
 }
 
 final class QueueTests: XCTestCase {
+  func testProductionCooldownStartsAfterSlowAcknowledgementRatherThanTickStart() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = try WorkspaceStore(root: root)
+    let provider = FixtureProvider()
+    let jobs = try await makeJobs(store, copies: 1)
+    let queue = GenerationQueue(store: store, providers: ["fixture": provider])
+    await queue.setEnabled(true)
+    await provider.delayAcknowledgement(200_000_000)
+    try await queue.tick()
+    try await queue.tick()
+    let actualAck = await provider.acknowledgedTime()
+    let until = try await store.cooldownUntil(jobs[0].binding.resource)
+    let ack = try XCTUnwrap(actualAck)
+    let cooldown = try XCTUnwrap(until)
+    XCTAssertGreaterThanOrEqual(cooldown.timeIntervalSince(ack), 9.99)
+  }
   func testPartialSurvivesRestartAndLostAckRetriesOnlyAck() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

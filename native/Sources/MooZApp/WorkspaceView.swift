@@ -685,7 +685,8 @@
 
   struct ConnectionWorkspace: View {
     @ObservedObject var model: WorkspaceModel
-    @State private var provider = "openai", key = ""
+    @State private var provider = "openai"
+    @State private var key = ""
     var body: some View {
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {

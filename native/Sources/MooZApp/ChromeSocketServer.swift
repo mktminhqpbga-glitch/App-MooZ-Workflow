@@ -143,7 +143,7 @@
         send(
           [
             "type": "ready", "protocol": 1, "appVersion": "0.6.0", "resultRecovery": 1,
-            "recoveryMs": 90_000, "pendingRequests": Array(pending.keys()),
+            "recoveryMs": 90_000, "pendingRequests": Array(pending.keys),
           ], to: id)
         return
       }

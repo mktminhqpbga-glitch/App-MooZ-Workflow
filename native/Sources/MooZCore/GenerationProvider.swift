@@ -82,7 +82,8 @@ public actor GenerationQueue {
   }
   public func setEnabled(_ enabled: Bool) { self.enabled = enabled }
   public func register(_ provider: any GenerationProvider, id: String) { providers[id] = provider }
-  public func tick(now: Date = Date()) async throws {
+  // Tests may freeze time explicitly; production reads the clock after each awaited operation.
+  public func tick(now: Date? = nil) async throws {
     guard !ticking else { return }
     ticking = true
     defer { ticking = false }
@@ -138,7 +139,7 @@ public actor GenerationQueue {
       if job.scenes[index].state == .persisted {
         do {
           try await provider.acknowledge(request)
-          _ = try await store.acknowledge(jobID: job.id, sceneIndex: index, now: now)
+          _ = try await store.acknowledge(jobID: job.id, sceneIndex: index, now: now ?? Date())
         } catch {
           job.error = "File đã lưu; đang chờ xác nhận: \(error.localizedDescription)"
           try await store.updateJob(job)
@@ -178,7 +179,9 @@ public actor GenerationQueue {
         try await store.updateJob(job)
         continue
       }
-      guard let claimed = try await store.claim(jobID: job.id, sceneIndex: index, now: now) else {
+      guard
+        let claimed = try await store.claim(jobID: job.id, sceneIndex: index, now: now ?? Date())
+      else {
         job = try await store.job(job.id) ?? job
         if [.queued, .waitingTab].contains(job.state) {
           job.state = .waitingTab
@@ -235,7 +238,8 @@ public actor GenerationQueue {
     return ProviderRequest(job: job, scene: job.scenes[index], inputs: inputs)
   }
   private func receive(
-    _ poll: ProviderPoll, job original: Job, index: Int, provider: any GenerationProvider, now: Date
+    _ poll: ProviderPoll, job original: Job, index: Int, provider: any GenerationProvider,
+    now: Date?
   ) async throws {
     var job = original
     switch poll {
@@ -296,7 +300,7 @@ public actor GenerationQueue {
       try await store.updateJob(job)  // Durable manifest before ACK. Failed ACK retries only ACK.
       if complete {
         try await provider.acknowledge(try await makeRequest(job, index: index))
-        _ = try await store.acknowledge(jobID: job.id, sceneIndex: index, now: now)
+        _ = try await store.acknowledge(jobID: job.id, sceneIndex: index, now: now ?? Date())
       }
     }
   }
