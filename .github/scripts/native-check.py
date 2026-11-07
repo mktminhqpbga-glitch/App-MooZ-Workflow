@@ -24,7 +24,13 @@ def main():
         print(line, end='', flush=True)
         recent.append(line.rstrip())
         match = re.match(r'^(.+\.swift):(\d+):(\d+): error: (.*)$', line.rstrip())
-        if not match or match.group(0) in reported or len(reported) >= 12:
+        if not match:
+            # XCTest thrown errors use <EXPR>:0, and media/tool failures may not name a Swift file.
+            if 'error:' in line.lower() and line.strip() not in reported and len(reported) < 12:
+                reported.add(line.strip())
+                print('::error::' + escaped(line.strip()[:6000]), flush=True)
+            continue
+        if match.group(0) in reported or len(reported) >= 12:
             continue
         reported.add(match.group(0))
         file, row, column, message = match.groups()
