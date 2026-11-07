@@ -2,15 +2,15 @@ name: Native macOS build and verification
 on:
   push:
     branches: [feat/native-macos]
-    paths: ['native/**', '.github/workflows/native-macos.yml']
+    paths: ['native/**', '.github/workflows/native-macos.yml', '.github/scripts/native-check.py']
   pull_request:
-    paths: ['native/**', '.github/workflows/native-macos.yml']
+    paths: ['native/**', '.github/workflows/native-macos.yml', '.github/scripts/native-check.py']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   companion:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -18,12 +18,13 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npx playwright install --with-deps chromium
+          cache-dependency-path: native/Tests/package-lock.json
+      - run: python3 .github/scripts/native-check.py npm --prefix native/Tests ci --ignore-scripts
+      - run: python3 .github/scripts/native-check.py npx --prefix native/Tests playwright install --with-deps chromium
       - name: Verify separate Chrome companion against fixture DOM
         run: |
-          node native/Tests/companion-worker.cjs
-          CHROMIUM_PATH="$(node -p 'require("playwright").chromium.executablePath()')" node native/Tests/companion.browser.cjs
+          python3 .github/scripts/native-check.py node native/Tests/companion-worker.cjs
+          CHROMIUM_PATH="$(node -p 'require("./native/Tests/node_modules/playwright").chromium.executablePath()')" python3 .github/scripts/native-check.py node native/Tests/companion.browser.cjs
   native:
     runs-on: macos-15-intel
     timeout-minutes: 35
@@ -34,12 +35,12 @@ jobs:
           swift --version
           command -v ffmpeg || brew install ffmpeg
       - name: Test and package native Swift app
-        run: bash native/Tools/package-macos.sh
+        run: python3 .github/scripts/native-check.py bash native/Tools/package-macos.sh
       - name: Verify app launch
         run: |
           export MOOZ_DATA_DIR="$RUNNER_TEMP/mooz-native-smoke"
           export MOOZ_SMOKE_OUTPUT="$GITHUB_WORKSPACE/native/artifacts"
-          native/artifacts/MooZ.app/Contents/MacOS/MooZ --smoke-test
+          python3 .github/scripts/native-check.py native/artifacts/MooZ.app/Contents/MacOS/MooZ --smoke-test
       - uses: actions/upload-artifact@v4
         with:
           name: MooZ-native-macOS-Intel-test-build
